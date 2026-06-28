@@ -34,7 +34,11 @@ class Retriever:
     def retrieve(self, query: str, k: int = 8, dept: str | None = None) -> list[Source]:
         if not query or not query.strip():
             return []
-        vec = self.embedder.embed([query])[0]
+        # 쿼리 전용 임베딩(Cohere 등은 search_query input_type 사용)
+        if hasattr(self.embedder, "embed_query"):
+            vec = self.embedder.embed_query(query)
+        else:
+            vec = self.embedder.embed([query])[0]
         res = self.client.rpc("hybrid_search", {
             "query_embedding": vec,
             "query_text": query,

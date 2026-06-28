@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from typing import Protocol, runtime_checkable
 
 from .config import EMBED_DIM
@@ -65,9 +66,43 @@ class BGEM3Embedder:
         return [v.tolist() for v in out["dense_vecs"]]
 
 
+class CohereEmbedder:
+    """Cohere embed-multilingual-v3.0 (1024d, 다국어·한국어 강함).
+
+    v3는 문서/쿼리 input_type을 구분한다(검색 품질에 중요):
+      - 문서 적재: search_document
+      - 쿼리:      search_query  (retriever가 embed_query 사용)
+    """
+
+    def __init__(self, model: str = "embed-multilingual-v3.0", version: str = "v3",
+                 api_key: str | None = None):
+        import cohere  # lazy
+
+        self.model = model
+        self.version = version
+        self._client = cohere.ClientV2(api_key or os.environ.get("COHERE_API_KEY"))
+
+    def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
+        out: list[list[float]] = []
+        for i in range(0, len(texts), 96):  # Cohere 배치 상한 96
+            resp = self._client.embed(
+                texts=texts[i:i + 96], model=self.model,
+                input_type=input_type, embedding_types=["float"])
+            out.extend(resp.embeddings.float_)
+        return out
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts, "search_document")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed([text], "search_query")[0]
+
+
 def make_embedder(provider: str, model: str, version: str) -> EmbeddingProvider:
     if provider == "fake":
         return FakeEmbedder(model, version)
     if provider == "bge-m3":
         return BGEM3Embedder(model or "BAAI/bge-m3", version)
+    if provider == "cohere":
+        return CohereEmbedder(model or "embed-multilingual-v3.0", version or "v3")
     raise ValueError(f"알 수 없는 임베딩 제공자: {provider}")
