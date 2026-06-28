@@ -1,0 +1,17 @@
+# 민감: 실제 전자결재 문서/비밀값은 저장소에 넣지 않는다
+ingest/zips/
+*.zip
+.env
+.env.local
+.env*.local
+
+# Python
+__pycache__/
+*.pyc
+
+# Node / Next.js / Vercel (web/)
+node_modules/
+.next/
+out/
+.vercel/
+next-env.d.ts

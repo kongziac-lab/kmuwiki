@@ -1,0 +1,55 @@
+# KMU Wiki — 인제스트 워커 (Phase 1)
+
+전자결재 ZIP → 잠금탐지 → 파싱 → 마스킹 → **이그레스 게이트** → 임베딩 → Supabase.
+마스터 플랜의 불변식을 코드로 강제한다: [../plans/kmu-wiki-master-plan.md](../plans/kmu-wiki-master-plan.md)
+
+## 핵심 불변식 (코드 위치)
+| 불변식 | 강제 위치 |
+|---|---|
+| 1·7 마스킹 후에만 외부 전송, 게이트로 검증 | `pii/egress_gate.py`, `pipeline.py` 6단계 |
+| 2 잠긴 파일 본문 미오픈 | `lockdetect.py`, `watcher.py`, `pipeline.py` 2단계 |
+| 3·6 차원 1024 고정·모델 핀 | `config.EMBED_DIM`, `embedding.py`, `doc_chunks.embed_model` |
+| 4 해시 멱등성 | `hashing.py`, `pipeline.py` 1단계 |
+| 5·8 RLS·deny-by-default | `supabase/migrations/0001_init.sql`, `metadata.py` |
+
+## 빠른 시작 (DB 없이 검증)
+```bash
+cd ingest
+python -m kmu_ingest.cli run --path ./zips --dry-run
+```
+`--dry-run` 은 의존성 없이(기본 fake 임베딩) 파이프라인을 끝까지 돌려 상태 분포를 출력한다.
+
+## 운영 실행
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # 값 채우기 (SUPABASE_*, KMU_EMBED_PROVIDER=bge-m3 등)
+python -m kmu_ingest.cli run
+```
+
+## 테스트
+```bash
+cd ingest
+python -m unittest discover -s tests -v
+```
+
+## 단계별 상태(state machine)
+`pending_password`(잠김) · `pending_ocr`(스캔본, OCR 대기) · `quarantine`(PII 잔존 차단) ·
+`processed` · `failed`. 2차(로컬 GPU 서버) 백필은 `pending_password`/`pending_ocr` 만 골라 처리.
+
+## 마스킹 정책 (§7.A)
+**무엇을 PII로 보고 가릴지**는 단일 정책(`pii/policy.py`)이 정한다. 마스커와 이그레스
+게이트가 같은 정책을 공유한다(어긋나면 전 문서 격리되므로).
+
+- **내부결재문 기본 정책**(`KMU_MASK_LABELS` 빈 값):
+  - 🔒 마스킹: **주민등록번호·카드·계좌·여권/면허·이메일** (유출 위험 식별자)
+  - 👤 보존: **성명·전화번호·주소** — 직원이 업무상 등장하는 식별 메타데이터(업무흐름도·담당자 조회에 필요)
+- **재정의**: `KMU_MASK_LABELS=주민등록번호,계좌번호,이메일,성명,주소` (민원·학생 등 제3자 정보 문서) 또는 `=all`.
+
+레이어:
+- **L1 정규식**(`pii/regex_rules.py`): 정책에 포함된 라벨만 치환. 계좌는 은행/계좌 키워드 인접 시에만(날짜·문서번호 오탐 방지).
+- **L2 NER**(`pii/ner.py`): 정책이 성명/주소를 켤 때만 동작(HuggingFace 한국어 NER, lazy). 기본 정책은 비활성 → 모델 불필요.
+- **L3 이그레스 게이트**(`pii/egress_gate.py`): 전송 직전, **정책과 동일한 라벨만** 재스캔→차단.
+
+## 샘플 ZIP 확정 후 채울 곳
+- `metadata.py` — 전자결재 index/헤더 파서, 부서·열람권·보안등급 매핑(§7.B)
+- `hwp_support.py`(미생성) — HWP/HWPX 텍스트 추출

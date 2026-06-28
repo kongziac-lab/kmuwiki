@@ -1,0 +1,5 @@
+# Phase 2 검색·RAG 서비스 (requirements.txt 에 더해)
+fastapi>=0.115
+uvicorn>=0.30
+anthropic>=0.40
+# 임베딩은 ingest와 동일 모델 사용(불변식 6). 운영: KMU_EMBED_PROVIDER=bge-m3 → FlagEmbedding 필요.
