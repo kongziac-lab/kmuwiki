@@ -1,5 +1,6 @@
 # 코어 (DB 적재·문서 파싱)
 supabase>=2.6
+python-dotenv>=1.0     # ingest/.env 자동 로드
 pdfplumber>=0.11
 python-docx>=1.1
 openpyxl>=3.1

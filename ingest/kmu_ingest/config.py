@@ -4,8 +4,24 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 EMBED_DIM = 1024  # 불변식 3: 시스템 전역 고정
+
+
+def _load_dotenv() -> None:
+    """ingest/.env(우선) 및 저장소 루트 .env 를 환경에 로드. python-dotenv 없으면 무시."""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    root = Path(__file__).resolve().parent.parent  # .../ingest
+    for cand in (root / ".env", root.parent / ".env"):
+        if cand.exists():
+            load_dotenv(cand, override=False)
+
+
+_load_dotenv()
 
 
 @dataclass
@@ -33,7 +49,9 @@ class Settings:
 
     # Supabase (service_role 키는 워커 전용; 클라이언트에 절대 노출 금지)
     supabase_url: str = os.environ.get("SUPABASE_URL", "")
-    supabase_service_key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    # SERVICE_ROLE_KEY 또는 새 secret 키(SUPABASE_SECRET_KEY) 둘 다 허용
+    supabase_service_key: str = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                                 or os.environ.get("SUPABASE_SECRET_KEY", ""))
     # 검색/RAG 측(Phase 2): anon 키 + 사용자 JWT로 RLS 적용. LLM은 Claude.
     supabase_anon_key: str = os.environ.get("SUPABASE_ANON_KEY", "")
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
