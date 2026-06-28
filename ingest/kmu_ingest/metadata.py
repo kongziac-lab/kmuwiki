@@ -1,10 +1,15 @@
-"""메타데이터 추출 (§7.B / Phase 1 작업 4).
+"""메타데이터 추출 (§7.B).
 
-⚠️ 샘플 ZIP 구조 확정 전까지는 파일명/경로 기반 휴리스틱만 사용한다.
-   확정되면 전자결재 index/헤더 파서를 여기에 추가하고, 열람권·보안등급을 매핑한다.
+실제 전자결재 기안문(PDF) 텍스트 구조에서 추출:
+  - 제목   : "제 목 <...>"
+  - 시행부서/문서번호 : "시행 <부서명>-<번호> ( YYYY.MM.DD. )"   ← 권한의 권위 있는 출처
+  - 시행일 : 위 괄호 안 날짜
 
-deny-by-default(불변식 8): dept/security_level 을 신뢰도 있게 못 채우면 None 으로 둔다.
-None 이면 RLS·검색에서 일반 노출되지 않고 관리자 전용으로 격리된다.
+ZIP=결재 1건이므로, 본문 기안문에서 한 번 추출해 같은 ZIP의 모든 파일에 상속한다.
+
+deny-by-default(불변식 8): dept는 '시행 부서-번호'가 있을 때만 채운다.
+본문이 참조한 다른 문서의 부서(예: 관련: ○○팀-123)는 이 문서의 기안 부서가 아닐 수 있어
+권한 산정에 쓰지 않는다(과다 노출 방지). 없으면 dept=None → 관리자 전용.
 """
 
 from __future__ import annotations
@@ -14,39 +19,49 @@ from datetime import date
 
 from .models import FileMeta
 
-# YYYY-MM-DD / YYYYMMDD / YYYY.MM.DD
-_DATE = re.compile(r"(20\d{2})[.\-_]?(0[1-9]|1[0-2])[.\-_]?(0[1-9]|[12]\d|3[01])")
-# 전자결재 문서번호 예: 제2025-13호 / 제 2025-0013 호
-_DOCNO = re.compile(r"제\s*(\d{4}-\d{1,5})\s*호")
+RE_TITLE = re.compile(r"제\s*목\s+(.+)")
+# 시행 <부서>-<번호> : 부서는 팀/처/과/부/원/실/단/관/위원회 등으로 끝남
+RE_SIHAENG_NO = re.compile(r"시행\s+([가-힣A-Za-z0-9]+(?:팀|처|과|부|원|실|단|관|위원회))-(\d+)")
+RE_SIHAENG_DATE = re.compile(r"시행[^()]*\(\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*\)")
+RE_ANYDATE = re.compile(r"(20\d{2})[.\-]\s?(0?[1-9]|1[0-2])[.\-]\s?(0?[1-9]|[12]\d|3[01])")
 
 
-def extract_meta(path_in_zip: str, filename: str, text: str | None) -> FileMeta:
-    meta = FileMeta(filename=filename, path_in_zip=path_in_zip)
+def extract_doc_fields(text: str | None) -> dict:
+    """기안문 텍스트 → {title, dept, doc_no, doc_date}. ZIP 단위로 1회 호출."""
+    fields: dict = {"title": None, "dept": None, "doc_no": None, "doc_date": None}
+    if not text:
+        return fields
 
-    # 날짜: 파일명 → 경로 → 본문 앞부분 순으로 탐색
-    for source in (filename, path_in_zip, (text or "")[:500]):
-        m = _DATE.search(source)
-        if m:
-            try:
-                meta.doc_date = date(int(m[1]), int(m[2]), int(m[3]))
-                break
-            except ValueError:
-                continue
+    m = RE_TITLE.search(text)
+    if m:
+        fields["title"] = m.group(1).strip()[:200]
 
-    # 문서번호
-    for source in (filename, (text or "")[:1000]):
-        m = _DOCNO.search(source)
-        if m:
-            meta.doc_no = f"제{m[1]}호"
-            break
+    # 권위 있는 부서·문서번호: 시행 부서-번호 (없으면 null → deny-by-default)
+    m = RE_SIHAENG_NO.search(text)
+    if m:
+        fields["dept"] = m.group(1)
+        fields["doc_no"] = f"{m.group(1)}-{m.group(2)}"
 
-    # 부서: ZIP 내 최상위 폴더명을 잠정 후보로(샘플 확정 후 매핑 테이블로 교체).
-    #   신뢰도가 낮으므로 '확정 매핑'이 생기기 전에는 dept=None 유지가 더 안전할 수 있다.
-    #   여기서는 후보만 담아두고, 실제 부여 여부는 매핑 도입 시 결정한다.
-    parts = path_in_zip.replace("\\", "/").split("/")
-    if len(parts) > 1 and parts[0]:
-        meta.dept = None  # TODO(sample): 부서 매핑 테이블 도입 전까지 deny-by-default
+    # 시행일자 (없으면 본문 첫 날짜로 약한 fallback)
+    m = RE_SIHAENG_DATE.search(text) or RE_ANYDATE.search(text)
+    if m:
+        try:
+            fields["doc_date"] = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+    return fields
 
-    # 보안등급: 샘플 메타 확정 전까지 미상 → None(관리자 전용 격리)
-    meta.security_level = None
-    return meta
+
+def build_file_meta(filename: str, path_in_zip: str, mime: str | None,
+                    zip_fields: dict | None) -> FileMeta:
+    """ZIP 단위 메타(zip_fields)를 파일 메타로 상속. security_level은 항상 None(미상=관리자 전용)."""
+    zf = zip_fields or {}
+    return FileMeta(
+        filename=filename,
+        path_in_zip=path_in_zip,
+        mime_type=mime,
+        dept=zf.get("dept"),            # 시행 부서-번호 있을 때만 채워짐
+        security_level=None,            # 보안등급 메타 부재 → deny-by-default
+        doc_no=zf.get("doc_no"),
+        doc_date=zf.get("doc_date"),
+    )

@@ -2,11 +2,15 @@
 
 반환 ParseResult.needs_ocr=True 이면 스캔본으로 보고 OCR 단계로 넘긴다.
 잠긴 파일은 이 단계에 오지 않는다(lockdetect 에서 걸러짐, 불변식 2).
+
+지원 포맷(실제 전자결재 ZIP 기준): pdf, hwp/hwpx, docx, xls/xlsx, html/htm, mht, txt/csv/md/json/xml.
 """
 
 from __future__ import annotations
 
+import html as _htmlmod
 import io
+import re
 from dataclasses import dataclass
 
 
@@ -17,35 +21,36 @@ class ParseResult:
     mime_type: str | None = None
 
 
-_TEXT_EXT = (".txt", ".csv", ".md", ".json", ".xml", ".html", ".htm")
+_PLAIN_EXT = (".txt", ".csv", ".md", ".json")
+_HTML_EXT = (".html", ".htm", ".xml")
+_IMG_EXT = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
 
 
 def extract_text(filename: str, data: bytes) -> ParseResult:
     name = filename.lower()
 
-    if name.endswith(_TEXT_EXT):
+    if name.endswith(_PLAIN_EXT):
         return ParseResult(_decode(data), mime_type="text/plain")
-
+    if name.endswith(_HTML_EXT):
+        return ParseResult(_strip_html(_decode(data)), mime_type="text/html")
     if name.endswith(".pdf"):
         return _pdf(data)
-
     if name.endswith(".docx"):
         return ParseResult(_docx(data), mime_type="application/vnd.openxmlformats")
-
     if name.endswith(".xlsx"):
         return ParseResult(_xlsx(data), mime_type="application/vnd.openxmlformats")
-
+    if name.endswith(".xls"):
+        return ParseResult(_xls(data), mime_type="application/vnd.ms-excel")
+    if name.endswith(".mht") or name.endswith(".mhtml"):
+        return ParseResult(_mht(data), mime_type="multipart/related")
     if name.endswith((".hwp", ".hwpx")):
         return _hwp(name, data)
-
-    if name.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")):
-        # 이미지 → OCR 필요
+    if name.endswith(_IMG_EXT):
         return ParseResult("", needs_ocr=True, mime_type="image/*")
-
-    # 미지원 포맷
     return ParseResult("", needs_ocr=False, mime_type=None)
 
 
+# ── 텍스트/HTML ────────────────────────────────────────────────
 def _decode(data: bytes) -> str:
     for enc in ("utf-8", "cp949", "euc-kr", "latin-1"):
         try:
@@ -55,6 +60,15 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _strip_html(s: str) -> str:
+    s = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", s)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = _htmlmod.unescape(s)
+    s = re.sub(r"[ \t]+", " ", s)
+    return re.sub(r"\n\s*\n+", "\n", s).strip()
+
+
+# ── PDF ────────────────────────────────────────────────────────
 def _pdf(data: bytes) -> ParseResult:
     try:
         import pdfplumber  # lazy
@@ -69,6 +83,7 @@ def _pdf(data: bytes) -> ParseResult:
     return ParseResult(text, needs_ocr=(len(text) < 20), mime_type="application/pdf")
 
 
+# ── Office ─────────────────────────────────────────────────────
 def _docx(data: bytes) -> str:
     import docx  # python-docx, lazy
 
@@ -92,16 +107,50 @@ def _xlsx(data: bytes) -> str:
     return "\n".join(parts).strip()
 
 
-def _hwp(name: str, data: bytes) -> ParseResult:
-    """HWP/HWPX 텍스트 추출. 구형 HWP는 파싱 난도가 높아 best-effort.
+def _xls(data: bytes) -> str:
+    """구형 .xls (BIFF). xlrd 필요."""
+    import xlrd  # lazy
 
-    실패 시 needs_ocr=False + 빈 텍스트 → 파이프라인에서 failed 처리(§7.H 리스크).
-    """
+    wb = xlrd.open_workbook(file_contents=data)
+    parts: list[str] = []
+    for sh in wb.sheets():
+        parts.append(f"# {sh.name}")
+        for r in range(sh.nrows):
+            parts.append("\t".join(_xls_cell(c) for c in sh.row(r)))
+    return "\n".join(parts).strip()
+
+
+def _xls_cell(cell) -> str:
+    v = cell.value
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return "" if v is None else str(v)
+
+
+# ── MHT (MHTML 웹 아카이브) ─────────────────────────────────────
+def _mht(data: bytes) -> str:
+    import email
+
+    msg = email.message_from_bytes(data)
+    parts: list[str] = []
+    for part in msg.walk():
+        ct = part.get_content_type()
+        if ct not in ("text/html", "text/plain"):
+            continue
+        payload = part.get_payload(decode=True) or b""
+        charset = part.get_content_charset() or "utf-8"
+        text = payload.decode(charset, "replace")
+        parts.append(_strip_html(text) if ct == "text/html" else text)
+    return "\n".join(p for p in parts if p.strip()).strip()
+
+
+# ── HWP ────────────────────────────────────────────────────────
+def _hwp(name: str, data: bytes) -> ParseResult:
+    """HWP/HWPX 텍스트 추출. 실패 시 빈 텍스트 → 파이프라인에서 failed 처리(§7.H)."""
     try:
+        from . import hwp_support
         if name.endswith(".hwpx"):
-            from .hwp_support import extract_hwpx  # 추후 구현
-            return ParseResult(extract_hwpx(data), mime_type="application/hwpx")
-        from .hwp_support import extract_hwp
-        return ParseResult(extract_hwp(data), mime_type="application/hwp")
+            return ParseResult(hwp_support.extract_hwpx(data), mime_type="application/hwpx")
+        return ParseResult(hwp_support.extract_hwp(data), mime_type="application/hwp")
     except Exception:
         return ParseResult("", needs_ocr=False, mime_type="application/hwp")

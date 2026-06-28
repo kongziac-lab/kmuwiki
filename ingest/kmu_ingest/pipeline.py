@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from . import lockdetect
 from .chunking import chunk_text
 from .config import Settings
 from .hashing import sha256_bytes
-from .metadata import extract_meta
+from .metadata import build_file_meta
 from .models import DocStatus, FileMeta
 from .ocr import OCREngine
 from .parsers import extract_text
@@ -36,6 +36,7 @@ class WorkItem:
     filename: str
     data: bytes
     zip_entry_encrypted: bool
+    zip_fields: dict = field(default_factory=dict)  # ZIP 단위 상속 메타(§7.B)
 
 
 @dataclass
@@ -64,12 +65,12 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
     if existing in ("processed", "superseded", "revoked", "pending_password", "pending_ocr"):
         return DocStatus(existing)
 
-    base_meta = FileMeta(filename=item.filename, path_in_zip=item.path_in_zip)
+    # ZIP 단위 메타(부서·문서번호·시행일)를 파일에 상속(§7.B). dept 미상이면 None=관리자 전용.
+    meta = build_file_meta(item.filename, item.path_in_zip, None, item.zip_fields)
 
-    # 2) 잠금탐지 (불변식 2): 본문을 열지 않고 판별
-    head = item.data[:8192]
-    if item.zip_entry_encrypted or lockdetect.file_is_encrypted(item.filename, head):
-        store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=base_meta,
+    # 2) 잠금탐지 (불변식 2): 본문을 열지 않고 판별. HWP 암호비트는 앞부분 밖일 수 있어 전체 전달.
+    if item.zip_entry_encrypted or lockdetect.file_is_encrypted(item.filename, item.data):
+        store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                               status=DocStatus.PENDING_PASSWORD.value, is_encrypted=True)
         return DocStatus.PENDING_PASSWORD
 
@@ -81,20 +82,18 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
         from_ocr = True
         # OCR 엔진이 없거나(미설치) 비활성 → 처리 보류(2차 백필 대상), 실패 아님.
         if not deps.ocr.available:
-            store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=base_meta,
+            store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                                   status=DocStatus.PENDING_OCR.value)
             return DocStatus.PENDING_OCR
     else:
         text = pr.text
 
     if not text or not text.strip():
-        store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=base_meta,
+        store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                               status=DocStatus.FAILED.value,
                               error="텍스트 추출 실패(빈 본문)")
         return DocStatus.FAILED
 
-    # 4) 메타추출
-    meta = extract_meta(item.path_in_zip, item.filename, text)
     meta.mime_type = pr.mime_type
 
     # 5) 마스킹 (OCR 본문은 고위험)
