@@ -172,3 +172,24 @@ create policy doc_chunks_select on doc_chunks
         )
     )
   );
+
+-- 나머지 public 테이블도 RLS 활성(미설정 시 PostgREST로 anon 노출됨).
+-- service_role(인제스트/서비스)은 RLS를 우회하므로 적재·로깅에는 영향 없음.
+alter table zip_archives enable row level security;
+alter table access_roles enable row level security;
+alter table access_log   enable row level security;
+
+-- zip_archives: 클라이언트 정책 없음 → 접근 불가(service_role 전용)
+
+-- 사용자는 본인 역할만 조회 가능
+drop policy if exists access_roles_self on access_roles;
+create policy access_roles_self on access_roles
+  for select to authenticated using (user_id = auth.uid());
+
+-- 감사 로그는 관리자만 조회(쓰기는 service_role)
+drop policy if exists access_log_admin on access_log;
+create policy access_log_admin on access_log
+  for select to authenticated using (
+    exists (select 1 from access_roles r
+            where r.user_id = auth.uid() and r.role = 'admin')
+  );
