@@ -1,15 +1,16 @@
 """메타데이터 추출 (§7.B).
 
-실제 전자결재 기안문(PDF) 텍스트 구조에서 추출:
+실제 전자결재 기안문(PDF) 텍스트/좌표 구조에서 추출:
   - 제목   : "제 목 <...>"
-  - 시행부서/문서번호 : "시행 <부서명>-<번호> ( YYYY.MM.DD. )"   ← 권한의 권위 있는 출처
+  - 시행 부서/문서번호 : "시행 <부서명>-<번호> ( YYYY.MM.DD. )"  ← 권한의 권위 있는 출처
   - 시행일 : 위 괄호 안 날짜
 
-ZIP=결재 1건이므로, 본문 기안문에서 한 번 추출해 같은 ZIP의 모든 파일에 상속한다.
+중요(실데이터 교훈): 부서명은 공백을 포함할 수 있고(예: "장춘대학 계명학원 행정팀"),
+긴 부서명은 표 셀에서 줄바꿈되어 번호가 다음 줄로 내려간다. 따라서 PDF는 단어 좌표로
+시행란을 복원해 번호를 안정적으로 추출한다(_docno_from_words).
 
-deny-by-default(불변식 8): dept는 '시행 부서-번호'가 있을 때만 채운다.
-본문이 참조한 다른 문서의 부서(예: 관련: ○○팀-123)는 이 문서의 기안 부서가 아닐 수 있어
-권한 산정에 쓰지 않는다(과다 노출 방지). 없으면 dept=None → 관리자 전용.
+ZIP=결재 1건이므로 본문 기안문에서 한 번 추출해 같은 ZIP의 모든 파일에 상속한다.
+deny-by-default(불변식 8): 추출 실패 시 dept=None → 관리자 전용.
 """
 
 from __future__ import annotations
@@ -20,29 +21,83 @@ from datetime import date
 from .models import FileMeta
 
 RE_TITLE = re.compile(r"제\s*목\s+(.+)")
-# 시행 <부서>-<번호> : 부서는 팀/처/과/부/원/실/단/관/위원회 등으로 끝남
-RE_SIHAENG_NO = re.compile(r"시행\s+([가-힣A-Za-z0-9]+(?:팀|처|과|부|원|실|단|관|위원회))-(\d+)")
+# 다단어 부서명 허용(공백 포함). 텍스트가 인접한 경우용(비-PDF/단순 케이스).
+RE_SIHAENG_NO = re.compile(
+    r"시행\s+([가-힣][가-힣A-Za-z0-9 ]*?(?:팀|처|과|부|원|실|단|관|위원회))\s*-\s*(\d+)")
 RE_SIHAENG_DATE = re.compile(r"시행[^()]*\(\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*\)")
 RE_ANYDATE = re.compile(r"(20\d{2})[.\-]\s?(0?[1-9]|1[0-2])[.\-]\s?(0?[1-9]|[12]\d|3[01])")
+# 부서-번호(줄바꿈 분리 가능). 단어 좌표 복원 후 적용.
+_DOCNO = re.compile(r"([가-힣][가-힣A-Za-z0-9 ]*?(?:팀|처|과|부|원|실|단|관|위원회))\s*-\s*(\d+)")
 
 
-def extract_doc_fields(text: str | None) -> dict:
-    """기안문 텍스트 → {title, dept, doc_no, doc_date}. ZIP 단위로 1회 호출."""
+def _docno_from_words(words: list[dict]) -> tuple[str, str] | None:
+    """PDF 단어 좌표로 시행란의 부서-번호를 복원.
+
+    words: pdfplumber extract_words() 결과(각 {'text','x0','x1','top'}).
+    '시행' 단어 오른쪽 ~ 날짜 '(' 왼쪽, 같은 y밴드의 단어들을 모아 부서-번호를 잇는다
+    (셀 줄바꿈으로 번호가 아래로 내려간 경우 포함).
+    """
+    si = [w for w in words if w["text"] == "시행"]
+    if not si:
+        return None
+    si = si[-1]
+    date_x = None
+    for w in sorted(words, key=lambda w: w["x0"]):
+        if w["x0"] > si["x1"] and abs(w["top"] - si["top"]) < 8 and w["text"].startswith("("):
+            date_x = w["x0"]
+            break
+    band = [w for w in words
+            if w["x0"] > si["x1"] - 2
+            and (date_x is None or w["x0"] < date_x - 2)
+            and -18 < (w["top"] - si["top"]) < 30
+            and w["text"] not in ("접수", "(", ")")]
+    band.sort(key=lambda w: (round(w["top"]), w["x0"]))
+    m = _DOCNO.search(" ".join(w["text"] for w in band))
+    return (m.group(1).strip(), m.group(2)) if m else None
+
+
+def extract_pdf_fields(pdf_bytes: bytes) -> dict:
+    """기안문 PDF → {title, dept, doc_no, doc_date}. 번호는 좌표 기반 복원."""
+    import io
+
+    import pdfplumber
+
     fields: dict = {"title": None, "dept": None, "doc_no": None, "doc_date": None}
-    if not text:
-        return fields
+    texts: list[str] = []
+    docno = None
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            texts.append(page.extract_text() or "")
+            docno = _docno_from_words(page.extract_words()) or docno
+    text = "\n".join(texts)
 
     m = RE_TITLE.search(text)
     if m:
         fields["title"] = m.group(1).strip()[:200]
+    if docno:
+        fields["dept"] = docno[0]
+        fields["doc_no"] = f"{docno[0]}-{docno[1]}"
+    m = RE_SIHAENG_DATE.search(text) or RE_ANYDATE.search(text)
+    if m:
+        try:
+            fields["doc_date"] = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+    return fields
 
-    # 권위 있는 부서·문서번호: 시행 부서-번호 (없으면 null → deny-by-default)
+
+def extract_doc_fields(text: str | None) -> dict:
+    """텍스트 기반 추출(비-PDF/단순 케이스 fallback). 줄바꿈 분리 번호는 못 잡을 수 있음."""
+    fields: dict = {"title": None, "dept": None, "doc_no": None, "doc_date": None}
+    if not text:
+        return fields
+    m = RE_TITLE.search(text)
+    if m:
+        fields["title"] = m.group(1).strip()[:200]
     m = RE_SIHAENG_NO.search(text)
     if m:
-        fields["dept"] = m.group(1)
-        fields["doc_no"] = f"{m.group(1)}-{m.group(2)}"
-
-    # 시행일자 (없으면 본문 첫 날짜로 약한 fallback)
+        fields["dept"] = m.group(1).strip()
+        fields["doc_no"] = f"{m.group(1).strip()}-{m.group(2)}"
     m = RE_SIHAENG_DATE.search(text) or RE_ANYDATE.search(text)
     if m:
         try:
@@ -60,8 +115,8 @@ def build_file_meta(filename: str, path_in_zip: str, mime: str | None,
         filename=filename,
         path_in_zip=path_in_zip,
         mime_type=mime,
-        dept=zf.get("dept"),            # 시행 부서-번호 있을 때만 채워짐
-        security_level=None,            # 보안등급 메타 부재 → deny-by-default
+        dept=zf.get("dept"),
+        security_level=None,
         doc_no=zf.get("doc_no"),
         doc_date=zf.get("doc_date"),
     )
