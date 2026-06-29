@@ -265,10 +265,11 @@ ZIP 누적 폴더 → 잠금 탐지 → (안 잠긴 것만) 파싱 → 마스킹
 
 ## Phase 2 — 검색 + LLM 챗봇 + 권한(RLS)
 
-> 구현 현황(2a 완료): 하이브리드 검색 SQL + Python 검색·RAG 코어 + FastAPI + Next.js 얇은 클라이언트.
+> 구현 현황(2a/2b 완료): 하이브리드 검색 SQL + Python 검색·RAG 코어 + FastAPI + Next.js 얇은 클라이언트.
 > 핵심 결정: 쿼리 임베딩을 문서와 동일 모델로 보장하기 위해 검색·RAG·LLM을 Python(`kmu_query`)에
 > 두고, Next.js는 SSE 프록시·UI만 담당(불변식 6). 검증: 검색/RAG 코어 단위테스트 6종 통과(총 38).
-> 남은 작업(2b): 로그인 UI(Supabase Auth), 키워드 검색 페이지, 실 Supabase·Claude 연결 통합 테스트.
+> 추가 구현: Supabase Auth 로그인 UI, 키워드/하이브리드 검색 페이지(`/search`), Vercel Services 기반 `/rag` 통합,
+> 웹↔RAG 공유 시크릿 헤더, 운영 Supabase·LLM 연결 검증.
 
 ### 무엇을 구현하나
 Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. RLS로 부서·직급별 접근 제어.

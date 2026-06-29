@@ -17,11 +17,15 @@ class TestUnifiedVercelServicesConfig(unittest.TestCase):
         self.assertEqual(services["rag"]["routePrefix"], "/rag")
 
     def test_web_proxy_uses_services_url_not_separate_api_project(self):
-        route = (ROOT / "web/app/api/chat/route.ts").read_text()
+        proxy = (ROOT / "web/lib/ragProxy.ts").read_text()
+        chat_route = (ROOT / "web/app/api/chat/route.ts").read_text()
+        search_route = (ROOT / "web/app/api/search/route.ts").read_text()
 
-        self.assertIn("process.env.NEXT_PUBLIC_RAG_URL", route)
-        self.assertIn("new URL(req.url).origin", route)
-        self.assertNotIn("kmuwiki-api.vercel.app", route)
+        self.assertIn("process.env.NEXT_PUBLIC_RAG_URL", proxy)
+        self.assertIn("new URL(requestUrl).origin", proxy)
+        self.assertIn("resolveRagBase(req.url)", chat_route)
+        self.assertIn("resolveRagBase(req.url)", search_route)
+        self.assertNotIn("kmuwiki-api.vercel.app", proxy + chat_route + search_route)
 
 
 if __name__ == "__main__":

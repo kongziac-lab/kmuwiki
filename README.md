@@ -27,5 +27,5 @@
 - 웹: `cd web && npm install && npm run dev`
 
 ## 배포
-- **web/** → Vercel (Next.js). 루트 디렉터리 `web`.
-- **ingest/** → 학교 내부 서버(마스킹은 망 내부에서). Vercel 배포 대상 아님.
+- **루트** → Vercel Services. `web/`은 Next.js 웹, `ingest/main.py`는 `/rag` FastAPI 검색·RAG 서비스.
+- **ingest/** 워커 → 학교 내부/로컬에서 실행. 원본 ZIP 파싱·마스킹·임베딩 적재는 Vercel에서 수행하지 않는다.

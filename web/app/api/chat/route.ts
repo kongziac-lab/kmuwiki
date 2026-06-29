@@ -5,36 +5,15 @@
 
 export const runtime = "nodejs";
 
-const RAG_PATH = process.env.NEXT_PUBLIC_RAG_URL ?? "/rag";
-const LOCAL_PY_API = process.env.NODE_ENV === "production" ? "" : process.env.PY_API_URL;
-const API_SECRET = process.env.KMU_API_SHARED_SECRET ?? "";
-
-function upstreamBase(req: Request): string {
-  if (LOCAL_PY_API) {
-    return LOCAL_PY_API.replace(/\/$/, "");
-  }
-  if (/^https?:\/\//.test(RAG_PATH)) {
-    return RAG_PATH.replace(/\/$/, "");
-  }
-  const origin = new URL(req.url).origin;
-  const path = RAG_PATH.startsWith("/") ? RAG_PATH : `/${RAG_PATH}`;
-  return `${origin}${path}`.replace(/\/$/, "");
-}
+import { buildRagHeaders, resolveRagBase } from "@/lib/ragProxy";
 
 export async function POST(req: Request) {
   const body = await req.text();
   const auth = req.headers.get("authorization") ?? "";
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    authorization: auth,
-  };
-  if (API_SECRET) {
-    headers["x-kmuwiki-api-secret"] = API_SECRET;
-  }
 
-  const upstream = await fetch(`${upstreamBase(req)}/chat`, {
+  const upstream = await fetch(`${resolveRagBase(req.url)}/chat`, {
     method: "POST",
-    headers,
+    headers: buildRagHeaders(auth),
     body,
   });
 

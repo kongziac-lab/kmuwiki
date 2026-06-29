@@ -2,9 +2,11 @@
   "name": "kmu-wiki-web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "start": "next start"
   },
   "dependencies": {

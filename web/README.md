@@ -10,7 +10,10 @@
 
 ## 구성
 - `app/page.tsx` — 채팅 UI(클라이언트). 로그인 세션의 JWT를 실어 `/api/chat` 호출, SSE 렌더.
+- `app/search/page.tsx` — 키워드/하이브리드 검색 UI. 권한 범위 내 마스킹 청크와 출처 메타 표시.
 - `app/api/chat/route.ts` — Python `/chat` 으로 스트리밍 프록시. 사용자 JWT 전달(RLS 적용), Python URL은 서버 전용.
+- `app/api/search/route.ts` — Python `/search` JSON 프록시. `/api/chat`과 같은 RLS/공유 시크릿 경로 사용.
+- `lib/ragProxy.ts` — Vercel Services(`/rag`)와 로컬 FastAPI(`PY_API_URL`) 경로 계산 및 공유 시크릿 헤더 구성.
 - `lib/supabase.ts` — 브라우저 Supabase 클라이언트(세션 토큰 획득).
 
 ## 권한 (RLS)
@@ -26,7 +29,6 @@ cp .env.example .env.local   # 값 채우기
 npm install && npm run dev
 ```
 
-## 남은 작업 (다음 단계)
-- 로그인 UI(Supabase Auth) — 현재는 세션이 있다고 가정.
-- 키워드-only 검색 페이지(`/search`), 출처 문서 원문 보기.
-- 코드는 App Router 패턴을 따르지만 설치된 Next 버전 기준으로 빌드 검증 필요.
+## 구현 상태
+- 로그인 UI(Supabase Auth), 챗봇(`/`), 검색(`/search`) 구현.
+- 설치된 Next.js 기준 `npm test`와 `npm run build` 검증.
