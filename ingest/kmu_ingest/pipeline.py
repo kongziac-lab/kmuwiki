@@ -97,13 +97,14 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
     fields = resolve_file_fields(item.filename, item.data, text, item.zip_fields)
     meta = build_file_meta(item.filename, item.path_in_zip, pr.mime_type, fields)
 
-    # 5) 마스킹 (OCR 본문은 고위험)
-    masked = deps.masker.mask(text)
+    # 5) 마스킹 (OCR 본문은 고위험: 전화번호 등 업무 메타도 보수적으로 제거)
+    masker = deps.masker.high_risk_copy() if from_ocr else deps.masker
+    masked = masker.mask(text)
 
     # 6) 이그레스 게이트 (불변식 7): 통과 못 하면 전송 금지·격리.
     #    마스킹 정책과 동일한 라벨만 강제(정책상 보존하는 라벨은 차단 대상 아님).
     try:
-        assert_clean(masked.text, enforce_labels=deps.masker.policy.enforced_high())
+        assert_clean(masked.text, enforce_labels=masker.policy.enforced_high())
     except EgressBlocked as e:
         store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                               status=DocStatus.QUARANTINE.value, error=str(e))

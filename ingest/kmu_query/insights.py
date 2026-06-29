@@ -61,7 +61,13 @@ def build_calendar_drafts(sources: list[Source]) -> list[dict]:
     drafts: list[dict] = []
     seen: set[tuple[str, str]] = set()
     for source in sources:
-        for found in _dates_in_text(source.content):
+        found_dates = _dates_in_text(source.content)
+        if not found_dates and source.doc_date and _can_use_doc_date_as_event(source):
+            try:
+                found_dates = [date.fromisoformat(source.doc_date)]
+            except ValueError:
+                found_dates = []
+        for found in found_dates:
             key = (found.isoformat(), source.document_id)
             if key in seen:
                 continue
@@ -107,6 +113,11 @@ def _event_title(source: Source) -> str:
     if "서류전형" in filename or "서류전형" in source.content:
         return "서류전형"
     return _compact(filename, 40)
+
+
+def _can_use_doc_date_as_event(source: Source) -> bool:
+    text = f"{source.filename or ''} {source.content}"
+    return any(keyword in text for keyword in ("계획", "안내", "일정"))
 
 
 def _year(source: Source) -> int | None:

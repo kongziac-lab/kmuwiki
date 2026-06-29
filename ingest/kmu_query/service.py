@@ -23,6 +23,7 @@ from . import rag
 from . import insights
 from . import hermes
 from .retriever import Retriever
+from .audit import log_access
 
 settings = load_settings()
 _embedder = make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version)
@@ -47,6 +48,11 @@ def _retriever(authorization: str | None) -> Retriever:
     return Retriever(_client(authorization), _embedder)
 
 
+def _client_and_retriever(authorization: str | None):
+    client = _client(authorization)
+    return client, Retriever(client, _embedder)
+
+
 def require_api_secret(header_secret: str | None, current_settings=settings) -> None:
     """공개 API 직접 호출 차단. 로컬 개발 편의를 위해 미설정이면 비활성."""
     expected = current_settings.api_shared_secret
@@ -64,8 +70,10 @@ async def search(
 ):
     require_api_secret(api_secret)
     body = await req.json()
-    sources = _retriever(authorization).retrieve(
+    client, retriever = _client_and_retriever(authorization)
+    sources = retriever.retrieve(
         body.get("query", ""), int(body.get("k", 8)), body.get("dept"))
+    log_access(client, action="search", query=body.get("query", ""), sources=sources)
     return JSONResponse({"sources": [s.__dict__ for s in sources]})
 
 
@@ -78,8 +86,10 @@ async def chat(
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
-    sources = _retriever(authorization).retrieve(
+    client, retriever = _client_and_retriever(authorization)
+    sources = retriever.retrieve(
         query, int(body.get("k", 8)), body.get("dept"))
+    log_access(client, action="chat", query=query, sources=sources)
 
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -107,8 +117,10 @@ async def build_insights(
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
-    sources = _retriever(authorization).retrieve(
+    client, retriever = _client_and_retriever(authorization)
+    sources = retriever.retrieve(
         query, int(body.get("k", 12)), body.get("dept"))
+    log_access(client, action="insights", query=query, sources=sources)
     return JSONResponse({
         "classifications": [insights.classify_source(s) for s in sources],
         "workflow_mermaid": insights.build_mermaid_timeline(sources),
@@ -128,8 +140,10 @@ async def hermes_report(
     query = body.get("query", "")
     known = set(body.get("known_document_ids") or [])
     target_year = body.get("target_year")
-    sources = _retriever(authorization).retrieve(
+    client, retriever = _client_and_retriever(authorization)
+    sources = retriever.retrieve(
         query, int(body.get("k", 12)), body.get("dept"))
+    log_access(client, action="hermes", query=query, sources=sources)
     drafts = []
     if isinstance(target_year, int):
         drafts = [hermes.draft_next_year_document(source, target_year) for source in sources[:3]]

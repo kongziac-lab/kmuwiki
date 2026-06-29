@@ -137,6 +137,27 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(st, DocStatus.PROCESSED)
         self.assertEqual(len(store.chunks), 1)
 
+    def test_ocr_text_uses_high_risk_masking_policy(self):
+        store = CapturingStore()
+        embedder = CapturingEmbedder()
+        data = b"\x89PNG\r\n\x1a\n fake"
+        deps = Deps(
+            settings=Settings(dry_run=True, embed_provider="fake"),
+            store=store,
+            masker=Masker(enable_ner=False),
+            ocr=OCREngine("none"),
+            embedder=embedder,
+        )
+        deps.ocr.available = True
+        deps.ocr.image_to_text = lambda _data: "OCR 본문 연락처 010-1234-5678 이메일 test@kmu.ac.kr"
+
+        st = process(item("scan.png", data), deps)
+
+        self.assertEqual(st, DocStatus.PROCESSED)
+        embedded = "\n".join(embedder.texts)
+        self.assertIn("[전화번호]", embedded)
+        self.assertNotIn("010-1234-5678", embedded)
+
     def test_boilerplate_and_meta_prefix_are_excluded_from_embedding_text(self):
         store = CapturingStore()
         embedder = CapturingEmbedder()

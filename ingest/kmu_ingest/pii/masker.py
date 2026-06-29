@@ -70,6 +70,16 @@ class Masker:
 
         return MaskResult(text=text, counts=counts, ner_available=ner_available)
 
+    def high_risk_copy(self) -> "Masker":
+        """OCR 등 고위험 본문용: 정형 PII 전체를 마스킹한다."""
+        return Masker(
+            enable_ner=self._ner is not None,
+            high_risk=True,
+            ner=self._ner,
+            ner_model=self._ner_model,
+            policy=MaskPolicy.all(),
+        )
+
     # ── NER 백엔드 (lazy, optional) ────────────────────────────────
     def _load_ner(self, ner_labels: set[str]):
         """한국어 NER 백엔드 로드. 백엔드/모델이 없으면 None(비활성).

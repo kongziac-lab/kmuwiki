@@ -25,6 +25,7 @@
 - 인제스트: `cd ingest && python -m kmu_ingest.cli run --dry-run`
 - 백필: `cd ingest && python -m kmu_ingest.cli backfill --dry-run`
 - 테스트: `cd ingest && python -m unittest discover -s tests`
+- Phase 6 정적 검증: `cd ingest && python -m kmu_verify.phase6 --out ../phase6-report.json`
 - 마스킹 평가: `cd ingest && python -m evaluation.evaluate`
 - 검색 API: `cd ingest && uvicorn kmu_query.service:app --port 8000`
 - 웹: `cd web && npm install && npm run dev`
@@ -32,3 +33,4 @@
 ## 배포
 - **루트** → Vercel Services. `web/`은 Next.js 웹, `ingest/main.py`는 `/rag` FastAPI 검색·RAG 서비스.
 - **ingest/** 워커 → 학교 내부/로컬에서 실행. 원본 ZIP 파싱·마스킹·임베딩 적재는 Vercel에서 수행하지 않는다.
+- 암호가 있는 파일 내부 복호는 보안된 내부 로컬 서버 구축 전까지 의도적으로 유예한다. 그 전까지 `pending_password`는 수동 큐/격리 상태로 유지한다.

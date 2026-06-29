@@ -296,8 +296,9 @@ Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. 
 ## Phase 3 — 로컬 GPU 서버 + 백필 (비번 해제 / OCR)
 
 > 구현 현황: `python -m kmu_ingest.cli backfill` 추가. `pending_password`·`pending_ocr`만 조회하며,
-> `processed` 문서는 재처리하지 않는다. 비밀번호 자동 시도는 사전 파일의 bounded list로 제한하고,
-> 지원하지 않는 파일 내부 암호/소스 누락은 `backfill-manual-queue.jsonl` 수동 큐로 격리한다.
+> `processed` 문서는 재처리하지 않는다. ZIP 엔트리 암호는 사전 파일의 bounded list로 제한해 시도한다.
+> 파일 내부 암호(PDF/HWP 등)는 보안된 내부 로컬 서버와 수동 운영 절차가 구축되기 전까지 의도적으로 유예하며,
+> `backfill-manual-queue.jsonl` 수동 큐로 격리한다.
 
 ### 무엇을 구현하나
 로컬 GPU 서버 구축 후, `pending_password`·`pending_ocr` 파일만 골라 처리하는 백필 워커.
@@ -306,6 +307,7 @@ Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. 
 1. **서버 구축**: Linux + NVIDIA GPU(중규모 기준 RTX 4060Ti 16GB/4070, RAM 64GB, NVMe 2TB+백업).
    - 인터넷 망 분리, 마스킹 이후 트래픽만 아웃바운드 허용(방화벽).
 2. **비밀번호 처리**: 기관 공통 패턴 사전(교번·생년월일·문서번호 등)으로 자동 해제 시도(설정파일 기반).
+   - ⚠️ 현재 유예: 파일 내부 암호 복호는 내부 로컬 서버 구축 전까지 구현하지 않는다. 잠긴 파일은 수동 큐에 남긴다.
    - 실패분은 수동 입력 큐로 분리.
 3. **GPU OCR**: PaddleOCR(korean)로 `pending_ocr`·해제된 스캔본 처리.
 4. **백필 실행**: `status in (pending_password, pending_ocr)`만 조회 → 해제/OCR → 마스킹 → 임베딩 → `status=processed` 갱신. **이미 processed는 건드리지 않음.**
@@ -372,6 +374,9 @@ DB를 기반으로 업무별 구분, 업무흐름도, 연간일정(구글 연동
 ---
 
 ## Phase 6 — 최종 검증
+
+> 구현 현황: `python -m kmu_verify.phase6 --out phase6-report.json` 정적 검증 리포트 추가.
+> 웹 프록시 인증 차단, service_role 프론트 노출 부재, 감사 로그 RPC, 암호 문서 유예 상태를 기계적으로 확인한다.
 
 1. **보안 회귀**: 클라우드 아웃바운드 트래픽 샘플에서 PII grep = 0 (전 Phase 통합).
 2. **권한 회귀**: 부서별 계정으로 교차 접근 테스트, RLS 우회 없음.

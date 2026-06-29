@@ -41,6 +41,15 @@ class TestInsights(unittest.TestCase):
         self.assertIn("면접전형", drafts[0]["title"])
         self.assertEqual(drafts[0]["status"], "draft")
 
+    def test_uses_doc_date_when_content_has_no_explicit_date(self):
+        source = Source("d3", 0, "면접전형 실시 계획", 0.9,
+                        filename="면접전형 실시 계획.xlsx",
+                        doc_no="국제교류팀-155", doc_date="2026-03-23", dept="국제교류팀")
+
+        drafts = build_calendar_drafts([source])
+
+        self.assertEqual(drafts[0]["date"], "2026-03-23")
+
     def test_draft_report_keeps_citations(self):
         report = draft_report("면접전형 일정", sources())
 
