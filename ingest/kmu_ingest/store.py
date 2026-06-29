@@ -23,7 +23,7 @@ class DryRunStore:
     def zip_seen(self, sha256: str) -> bool:
         return sha256 in self._zips
 
-    def register_zip(self, filename: str, sha256: str, file_count: int) -> str:
+    def register_zip(self, filename: str, sha256: str, file_count: int, *, source_path: str | None = None) -> str:
         self._zips.add(sha256)
         return f"dryrun-zip-{sha256[:8]}"
 
@@ -36,6 +36,7 @@ class DryRunStore:
     ) -> str:
         self._docs[sha256] = status
         print(f"  [doc] {meta.path_in_zip} -> {status}"
+              + f" (task={meta.task_category}, review={meta.review_required})"
               + (f" (enc, dept={meta.dept}, sec={meta.security_level})" if is_encrypted else ""))
         return f"dryrun-doc-{sha256[:8]}"
 
@@ -63,9 +64,14 @@ class SupabaseStore:
         r = self.c.table("zip_archives").select("id").eq("sha256", sha256).execute()
         return bool(r.data)
 
-    def register_zip(self, filename: str, sha256: str, file_count: int) -> str:
+    def register_zip(self, filename: str, sha256: str, file_count: int, *, source_path: str | None = None) -> str:
         r = (self.c.table("zip_archives")
-             .upsert({"filename": filename, "sha256": sha256, "file_count": file_count},
+             .upsert({
+                 "filename": filename,
+                 "sha256": sha256,
+                 "file_count": file_count,
+                 "source_path": source_path or filename,
+             },
                      on_conflict="sha256")
              .execute())
         return r.data[0]["id"]
@@ -83,6 +89,9 @@ class SupabaseStore:
             "filename": meta.filename, "path_in_zip": meta.path_in_zip,
             "mime_type": meta.mime_type, "is_encrypted": is_encrypted,
             "status": status, "dept": meta.dept, "security_level": meta.security_level,
+            "task_category": meta.task_category,
+            "classification_confidence": meta.classification_confidence,
+            "review_required": meta.review_required,
             "doc_no": meta.doc_no, "author": meta.author, "version": meta.version,
             "doc_date": meta.doc_date.isoformat() if meta.doc_date else None,
             "error": error,
@@ -108,7 +117,7 @@ class SupabaseStore:
 
     def list_backfill_candidates(self, limit: int = 100):
         r = (self.c.table("documents")
-             .select("id,sha256,status,path_in_zip,filename,zip_archives(filename)")
+             .select("id,sha256,status,path_in_zip,filename,zip_archives(filename,source_path)")
              .in_("status", sorted(BACKFILL_STATUSES))
              .limit(limit)
              .execute())

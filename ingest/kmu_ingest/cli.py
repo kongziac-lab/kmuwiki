@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
+from pathlib import Path
 
 from .backfill import DEFAULT_MAX_PASSWORD_ATTEMPTS, load_password_dictionary, run_backfill
 from .config import load_settings
@@ -42,9 +43,10 @@ def cmd_run(args: argparse.Namespace) -> int:
           f"(dry_run={settings.dry_run}, embed={settings.embed_provider}, ocr={settings.ocr_backend})")
 
     stats: Counter[str] = Counter()
+    zip_root = Path(settings.zip_dir)
     for zp in zips:
         print(f"\n# {zp.name}")
-        for item in iter_work(zp, store):
+        for item in iter_work(zp, store, zip_root=zip_root):
             status = process(item, deps)
             stats[status.value] += 1
 

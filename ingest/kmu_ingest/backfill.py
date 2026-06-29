@@ -27,6 +27,7 @@ class BackfillCandidate:
     sha256: str
     status: str
     zip_filename: str | None
+    zip_source_path: str | None
     path_in_zip: str
     filename: str
 
@@ -36,6 +37,7 @@ class BackfillCandidate:
             "sha256": self.sha256,
             "status": self.status,
             "zip_filename": self.zip_filename,
+            "zip_source_path": self.zip_source_path,
             "path_in_zip": self.path_in_zip,
             "filename": self.filename,
             "reason": reason,
@@ -59,6 +61,7 @@ def backfill_candidates(rows: Iterable[dict]) -> list[BackfillCandidate]:
             sha256=str(row["sha256"]),
             status=str(status),
             zip_filename=archive.get("filename") or row.get("zip_filename"),
+            zip_source_path=archive.get("source_path") or row.get("zip_source_path"),
             path_in_zip=str(row["path_in_zip"]),
             filename=str(row["filename"]),
         ))
@@ -143,10 +146,12 @@ def run_backfill(
             stats["manual_queue"] += 1
             manual_entries.append(candidate.manual_queue("missing source zip filename"))
             continue
-        zip_path = zip_root / candidate.zip_filename
+        source = candidate.zip_source_path or candidate.zip_filename
+        source_path = Path(source)
+        zip_path = source_path if source_path.is_absolute() else zip_root / source_path
         if not zip_path.exists():
             stats["manual_queue"] += 1
-            manual_entries.append(candidate.manual_queue(f"source zip not found: {candidate.zip_filename}"))
+            manual_entries.append(candidate.manual_queue(f"source zip not found: {source}"))
             continue
 
         with zipfile.ZipFile(zip_path) as zf:

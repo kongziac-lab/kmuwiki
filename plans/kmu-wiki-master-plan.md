@@ -115,11 +115,11 @@ Supabase(pgvector)에 적재한 뒤 다음 용도로 활용한다.
 ### 1.1 데이터 흐름 (마스킹 경계선 명시)
 
 ```
-[ZIP 누적 폴더] (한 폴더에 계속 적재)
+[ZIP 누적 폴더] (한 폴더에 계속 적재; 하위 폴더가 있어도 source_path로만 추적)
       │
       ▼
 ┌─────────────────────── 로컬 (현재 Mac → 추후 GPU 서버) ───────────────────────┐
-│  Watcher → ZIP 풀기 → 파일별 SHA-256 해시 → 잠금 탐지                          │
+│  Watcher → ZIP 풀기 → 파일별 SHA-256 해시 → 잠금 탐지 → 업무분류 메타 추정      │
 │      ├─ 잠김 → 메타데이터만 DB 등록 (status=pending_password)  [본문 안 봄]     │
 │      └─ 안 잠김                                                                │
 │            ├─ 텍스트형 → Parser로 텍스트 추출                                   │
@@ -165,6 +165,7 @@ create extension if not exists vector;
 create table zip_archives (
   id            uuid primary key default gen_random_uuid(),
   filename      text not null,
+  source_path   text,                         -- 원본 ZIP 상대 경로(한 폴더/하위폴더 모두 추적)
   sha256        text not null unique,        -- ZIP 자체 해시(중복 적재 방지)
   imported_at   timestamptz default now(),
   file_count    int
@@ -183,6 +184,8 @@ create table documents (
   dept          text,                         -- 권한 분류용(부서)
   doc_date      date,
   task_category text,                         -- 업무별 구분(Phase 4에서 채움)
+  classification_confidence numeric default 0,
+  review_required boolean default true,
   created_at    timestamptz default now(),
   processed_at  timestamptz
 );
@@ -236,12 +239,13 @@ ZIP 누적 폴더 → 잠금 탐지 → (안 잠긴 것만) 파싱 → 마스킹
 잠긴 파일은 **메타데이터만** 등록(`status=pending_password`).
 
 ### 작업 항목
-1. **폴더 감시·해시**: 지정 폴더의 새 ZIP 감지, ZIP·파일별 SHA-256 계산, 중복 스킵.
+1. **폴더 감시·해시**: 지정 폴더의 새 ZIP 감지(하위 폴더 포함), ZIP·파일별 SHA-256 계산, 중복 스킵. 원본 위치는 `zip_archives.source_path`에 저장하며, 파일 보관 구조와 지식베이스 분류는 분리한다.
 2. **잠금 탐지**(본문 미오픈): `zipfile` 플래그, PDF `is_encrypted`, Office/HWP OLE 플래그.
    - 잠김 → `documents`에 메타만 insert(`is_encrypted=true`, `status=pending_password`).
 3. **파싱**: 텍스트형 문서 추출(pdfplumber/python-docx/openpyxl/hwp).
    - 스캔형이면서 CPU OCR로 감당되면 EasyOCR 처리, 무거우면 `status=pending_ocr`로 지연.
 4. **메타데이터 추출**: 전자결재 ZIP의 구조(폴더명·index 파일·문서 헤더)에서 `dept`·`doc_date`·작성자·문서번호를 파싱해 `documents`에 채운다. **`dept`는 Phase 2 RLS의 전제이므로 1차에서 반드시 채운다**(못 채우면 `dept=null` → 관리자 전용으로 격리, 불변식 8).
+   - 파일명/본문 기반 업무 분류를 수행해 `task_category`, `classification_confidence`, `review_required`를 저장한다. 확신도가 낮으면 `미분류`로 두고 운영 검토 큐에 남긴다.
 5. **개인정보 탐지·마스킹(로컬, CPU)**: 정규식(주민번호 등) + 한국어 NER. Presidio Anonymizer로 치환. **OCR 본문은 고위험 등급**으로 더 공격적 마스킹 정책 적용(§7.A).
 6. **이그레스 게이트(egress gate)**: 임베딩 호출 직전, 마스킹 결과를 PII 정규식으로 재스캔. 1건이라도 검출되면 전송 차단 + `status=quarantine` 격리(불변식 7).
 7. **청킹·임베딩**: 마스킹 본문을 청크 분할(§7.C 전략) → 임베딩(1024d, 모델 핀) → `doc_chunks` 적재, `documents.status=processed`.
@@ -329,6 +333,8 @@ Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. 
 
 > 구현 현황: `kmu_query.insights`와 `/rag/insights`(`/api/insights` 프록시) 추가.
 > 검색 결과 기반 업무 분류, Mermaid 업무흐름도, 일정 draft, 출처 포함 보고서 draft를 생성한다.
+> 인제스트 단계에서는 비용 없는 규칙 기반 1차 업무 분류를 `documents.task_category`에 저장하고,
+> 낮은 확신도 문서는 `review_required=true`로 남긴다.
 
 ### 무엇을 구현하나
 DB를 기반으로 업무별 구분, 업무흐름도, 연간일정(구글 연동), 보고서 작성 보조.

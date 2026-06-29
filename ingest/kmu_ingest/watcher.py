@@ -23,7 +23,20 @@ from .pipeline import WorkItem
 
 
 def iter_zip_files(zip_dir: str) -> list[Path]:
-    return sorted(Path(zip_dir).glob("*.zip"))
+    root = Path(zip_dir)
+    return sorted(
+        (p for p in root.rglob("*.zip") if p.is_file()),
+        key=lambda p: p.relative_to(root).as_posix(),
+    )
+
+
+def _relative_source_path(zip_path: Path, zip_root: Path | None) -> str:
+    if zip_root is None:
+        return zip_path.name
+    try:
+        return zip_path.relative_to(zip_root).as_posix()
+    except ValueError:
+        return zip_path.name
 
 
 def _decode_name(info: zipfile.ZipInfo) -> str:
@@ -76,7 +89,7 @@ def _zip_fields(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
     return best_any or {}
 
 
-def iter_work(zip_path: Path, store) -> Iterator[WorkItem]:
+def iter_work(zip_path: Path, store, *, zip_root: Path | None = None) -> Iterator[WorkItem]:
     """한 ZIP을 열어 처리 대상 파일들을 WorkItem 으로 산출."""
     zsha = sha256_file(zip_path)
     if store.zip_seen(zsha):
@@ -86,7 +99,10 @@ def iter_work(zip_path: Path, store) -> Iterator[WorkItem]:
         infos = [i for i in zf.infolist() if not i.is_dir()]
         names = [_decode_name(i) for i in infos]
         zip_fields = _zip_fields(zf, infos, names)
-        zip_id = store.register_zip(zip_path.name, zsha, len(infos))
+        zip_id = store.register_zip(
+            zip_path.name, zsha, len(infos),
+            source_path=_relative_source_path(zip_path, zip_root),
+        )
         for info, name in zip(infos, names):
             entry_enc = lockdetect.zip_entry_encrypted(info)
             # 엔트리가 암호화면 읽지 않는다(본문 미오픈, 불변식 2).

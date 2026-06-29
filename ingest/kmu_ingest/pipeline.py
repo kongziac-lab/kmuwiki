@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from . import lockdetect
 from .chunking import chunk_text
+from .classification import classify_document
 from .cleaning import strip_boilerplate
 from .config import Settings
 from .hashing import sha256_bytes
@@ -27,6 +28,13 @@ from .ocr import OCREngine
 from .parsers import extract_text
 from .pii.egress_gate import EgressBlocked, assert_clean
 from .pii.masker import Masker
+
+
+def _apply_organization(meta, text: str | None) -> None:
+    classification = classify_document(meta.filename, meta.path_in_zip, text)
+    meta.task_category = classification.task_category
+    meta.classification_confidence = classification.confidence
+    meta.review_required = classification.review_required
 
 
 @dataclass
@@ -66,6 +74,7 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
 
     # ZIP 단위 메타(부서·문서번호·시행일)를 파일에 상속(§7.B). dept 미상이면 None=관리자 전용.
     meta = build_file_meta(item.filename, item.path_in_zip, None, item.zip_fields)
+    _apply_organization(meta, None)
 
     # 2) 잠금탐지 (불변식 2): 본문을 열지 않고 판별. HWP 암호비트는 앞부분 밖일 수 있어 전체 전달.
     if item.zip_entry_encrypted or lockdetect.file_is_encrypted(item.filename, item.data):
@@ -96,6 +105,7 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
     # 파일별 시행번호 해석(붙임=상속, 그 외 PDF/문서=자기 번호 우선) — §7.B 개선
     fields = resolve_file_fields(item.filename, item.data, text, item.zip_fields)
     meta = build_file_meta(item.filename, item.path_in_zip, pr.mime_type, fields)
+    _apply_organization(meta, text)
 
     # 5) 마스킹 (OCR 본문은 고위험: 전화번호 등 업무 메타도 보수적으로 제거)
     masker = deps.masker.high_risk_copy() if from_ocr else deps.masker

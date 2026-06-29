@@ -18,11 +18,12 @@
 ## 핵심 원칙
 - **마스킹 경계선**: 주민번호·계좌·카드·이메일은 클라우드 전송 직전 마스킹. 정책(`MaskPolicy`)으로 토글.
 - **단계적 처리**: 잠긴 파일은 1차에서 메타만 등록(`pending_password`), 로컬 GPU 서버 구축 후 백필.
+- **원본/지식베이스 분리**: 원본 ZIP은 한 폴더에 계속 넣고, 지식베이스 정리는 임베딩·업무분류 메타(`task_category`)·검토 플래그로 수행.
 - **권한**: Supabase RLS로 부서·보안등급별 강제(deny-by-default).
 - **임베딩 모델 핀**: 쿼리·문서 동일 모델(1024차원).
 
 ## 빠른 시작
-- 인제스트: `cd ingest && python -m kmu_ingest.cli run --dry-run`
+- 인제스트: `cd ingest && python -m kmu_ingest.cli run --path ./zips --dry-run`
 - 백필: `cd ingest && python -m kmu_ingest.cli backfill --dry-run`
 - 테스트: `cd ingest && python -m unittest discover -s tests`
 - Phase 6 정적 검증: `cd ingest && python -m kmu_verify.phase6 --out ../phase6-report.json`
@@ -33,4 +34,5 @@
 ## 배포
 - **루트** → Vercel Services. `web/`은 Next.js 웹, `ingest/main.py`는 `/rag` FastAPI 검색·RAG 서비스.
 - **ingest/** 워커 → 학교 내부/로컬에서 실행. 원본 ZIP 파싱·마스킹·임베딩 적재는 Vercel에서 수행하지 않는다.
+- 원본 ZIP 파일명/하위폴더는 `zip_archives.source_path`로 추적한다. 파일 보관 구조가 바뀌어도 검색 기준은 DB 메타데이터다.
 - 암호가 있는 파일 내부 복호는 보안된 내부 로컬 서버 구축 전까지 의도적으로 유예한다. 그 전까지 `pending_password`는 수동 큐/격리 상태로 유지한다.

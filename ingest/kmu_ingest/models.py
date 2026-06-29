@@ -34,6 +34,9 @@ class FileMeta:
     mime_type: str | None = None
     dept: str | None = None
     security_level: str | None = None
+    task_category: str | None = None
+    classification_confidence: float = 0.0
+    review_required: bool = True
     doc_no: str | None = None
     doc_date: date | None = None
     author: str | None = None

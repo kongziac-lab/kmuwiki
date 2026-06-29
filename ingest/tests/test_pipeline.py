@@ -33,6 +33,7 @@ class CapturingStore:
     def __init__(self):
         self.chunks: list[Chunk] = []
         self._docs: dict[str, str] = {}
+        self.last_meta = None
 
     def document_status(self, sha256):
         return self._docs.get(sha256)
@@ -40,6 +41,7 @@ class CapturingStore:
     def upsert_document(self, *, sha256, zip_id, meta, status,
                         is_encrypted=False, error=None):
         self._docs[sha256] = status
+        self.last_meta = meta
         return f"doc-{sha256[:8]}"
 
     def insert_chunks(self, document_id, chunks, embeddings, model, version):
@@ -187,6 +189,24 @@ class TestPipeline(unittest.TestCase):
         self.assertNotIn("수신자 내부결재", embedded)
         self.assertNotIn("시행 국제교류팀-155", embedded)
         self.assertTrue(all(not c.content.startswith("[") for c in store.chunks))
+
+    def test_pipeline_stores_knowledge_organization_metadata(self):
+        store = CapturingStore()
+        deps = Deps(
+            settings=Settings(dry_run=True, embed_provider="fake"),
+            store=store,
+            masker=Masker(enable_ner=False),
+            ocr=OCREngine("none"),
+            embedder=make_embedder("fake", "fake-deterministic", "v1"),
+        )
+        text = "제 목 2026학년도 파견교환학생 선발 계획\n면접전형 및 추천 절차 안내"
+
+        st = process(item("파견교환학생 선발 계획.txt", text.encode()), deps)
+
+        self.assertEqual(st, DocStatus.PROCESSED)
+        self.assertEqual(store.last_meta.task_category, "파견교환학생")
+        self.assertGreaterEqual(store.last_meta.classification_confidence, 0.9)
+        self.assertFalse(store.last_meta.review_required)
 
 
 if __name__ == "__main__":
