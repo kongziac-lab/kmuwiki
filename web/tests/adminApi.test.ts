@@ -43,3 +43,21 @@ test("ingest command uses configured zip folder without shell interpolation", ()
   assert.deepEqual(command.args, ["-m", "kmu_ingest.cli", "run", "--path", String.raw`\\NAS\KMU Wiki\2026`]);
   assert.equal(command.cwd, String.raw`C:\kmuwiki\ingest`);
 });
+
+test("admin page presents dashboard cards and a collapsed review queue", () => {
+  const page = readFileSync(new URL("../app/admin/page.tsx", import.meta.url), "utf8");
+  const globals = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(page, /className="admin-metric/);
+  assert.match(page, /className="admin-dashboard-grid"/);
+  assert.match(page, /<details className="admin-review-panel">/);
+  assert.doesNotMatch(page, /<details className="admin-review-panel" open>/);
+  assert.match(page, /<summary className="admin-review-summary">/);
+
+  assert.match(globals, /\.admin-metric\s*\{/);
+  assert.match(globals, /\.admin-metric::before\s*\{/);
+  assert.match(globals, /place-items: center/);
+  assert.match(globals, /--metric-accent/);
+  assert.match(globals, /\.admin-dashboard-grid\s*\{/);
+  assert.match(globals, /\.admin-review-panel\s*\{/);
+});

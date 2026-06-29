@@ -210,43 +210,48 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
       {message && <p style={okText}>{message}</p>}
 
       <div style={metricGrid}>
-        <Metric label="ZIP" value={summary?.zip_count ?? 0} />
-        <Metric label="문서" value={summary?.document_count ?? 0} />
-        <Metric label="청크" value={summary?.chunk_count ?? 0} />
-        <Metric label="검토 필요" value={summary?.review_required ?? 0} />
+        <Metric label="ZIP" value={summary?.zip_count ?? 0} accent="linear-gradient(90deg, #7aa2ff, #4ad7ff)" />
+        <Metric label="문서" value={summary?.document_count ?? 0} accent="linear-gradient(90deg, #8cffc7, #7aa2ff)" />
+        <Metric label="청크" value={summary?.chunk_count ?? 0} accent="linear-gradient(90deg, #f6c85f, #ff8a4c)" />
+        <Metric label="검토 필요" value={summary?.review_required ?? 0} accent="linear-gradient(90deg, #ff7a8a, #c084fc)" />
       </div>
 
-      <section style={section}>
-        <div style={sectionHead}>
-          <h2 style={sectionTitle}>로컬 인제스트</h2>
-          <button onClick={runIngest} disabled={!ingest?.allowed || ingestBusy} style={button}>
-            {ingestBusy ? "실행 중..." : "인제스트 실행"}
-          </button>
-        </div>
-        <dl style={detailsGrid}>
-          <Info label="폴더" value={ingest?.zipDir ?? "-"} />
-          <Info label="호스트" value={ingest?.host ?? "-"} />
-          <Info label="상태" value={ingest?.allowed ? "실행 가능" : "localhost 전용"} />
-        </dl>
-      </section>
+      <div className="admin-dashboard-grid">
+        <section className="admin-dashboard-card admin-dashboard-card-wide">
+          <div style={sectionHead}>
+            <h2 style={sectionTitle}>로컬 인제스트</h2>
+            <button onClick={runIngest} disabled={!ingest?.allowed || ingestBusy} style={button}>
+              {ingestBusy ? "실행 중..." : "인제스트 실행"}
+            </button>
+          </div>
+          <dl style={detailsGrid}>
+            <Info label="폴더" value={ingest?.zipDir ?? "-"} />
+            <Info label="호스트" value={ingest?.host ?? "-"} />
+            <Info label="상태" value={ingest?.allowed ? "실행 가능" : "localhost 전용"} />
+          </dl>
+        </section>
 
-      <section style={section}>
-        <h2 style={sectionTitle}>상태</h2>
-        <div style={pillRow}>
-          {Object.entries(statusCounts).map(([key, value]) => <Pill key={key} label={key} value={value} />)}
-        </div>
-      </section>
+        <section className="admin-dashboard-card">
+          <h2 style={sectionTitle}>상태</h2>
+          <div style={pillRow}>
+            {Object.entries(statusCounts).map(([key, value]) => <Pill key={key} label={key} value={value} />)}
+          </div>
+        </section>
 
-      <section style={section}>
-        <h2 style={sectionTitle}>업무 분류</h2>
-        <div style={pillRow}>
-          {Object.entries(categoryCounts).map(([key, value]) => <Pill key={key} label={key} value={value} />)}
-        </div>
-      </section>
+        <section className="admin-dashboard-card">
+          <h2 style={sectionTitle}>업무 분류</h2>
+          <div style={pillRow}>
+            {Object.entries(categoryCounts).map(([key, value]) => <Pill key={key} label={key} value={value} />)}
+          </div>
+        </section>
+      </div>
 
-      <section style={section}>
-        <h2 style={sectionTitle}>검토 큐</h2>
-        <div style={{ overflowX: "auto" }}>
+      <details className="admin-review-panel">
+        <summary className="admin-review-summary">
+          <span>검토 큐</span>
+          <span className="admin-review-count">{reviewDocs.length.toLocaleString()}건</span>
+        </summary>
+        <div className="admin-review-body">
           <table style={table}>
             <thead>
               <tr>
@@ -277,16 +282,18 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
             </tbody>
           </table>
         </div>
-      </section>
+      </details>
     </section>
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value, accent }: { label: string; value: number; accent: string }) {
+  const style = { "--metric-accent": accent } as React.CSSProperties;
+
   return (
-    <div style={metric}>
-      <span style={tiny}>{label}</span>
-      <strong style={{ fontSize: 28 }}>{value.toLocaleString()}</strong>
+    <div className="admin-metric" style={style}>
+      <span className="admin-metric-label">{label}</span>
+      <strong className="admin-metric-value">{value.toLocaleString()}</strong>
     </div>
   );
 }
@@ -312,7 +319,6 @@ function Td({ children, colSpan }: { children: React.ReactNode; colSpan?: number
   return <td colSpan={colSpan} style={td}>{children}</td>;
 }
 
-const GLASS = "rgba(255,255,255,0.055)";
 const HAIR = "1px solid rgba(255,255,255,0.12)";
 const HAIR_SOFT = "1px solid rgba(255,255,255,0.07)";
 const muted: React.CSSProperties = { color: "#9aa6d6", margin: "8px 0 0" };
@@ -320,8 +326,6 @@ const button: React.CSSProperties = { padding: "12px 22px", fontSize: 15, fontWe
 const smallButton: React.CSSProperties = { padding: "7px 14px", fontSize: 13, color: "#eef2ff", background: "rgba(255,255,255,0.09)", border: HAIR, borderRadius: 999, cursor: "pointer" };
 const accountRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 };
 const metricGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 };
-const metric: React.CSSProperties = { background: GLASS, border: HAIR, borderRadius: 18, padding: "16px 18px", minHeight: 76, backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" };
-const section: React.CSSProperties = { marginTop: 30, borderTop: HAIR_SOFT, paddingTop: 22 };
 const sectionHead: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" };
 const sectionTitle: React.CSSProperties = { margin: 0, fontSize: 20, fontWeight: 700 };
 const detailsGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(220px, 2fr) repeat(2, minmax(120px, 1fr))", gap: 16, margin: "14px 0 0" };
