@@ -107,6 +107,28 @@ type TimelineItem = {
   detail: string;
 };
 
+type WorkflowNodeType = "start" | "step" | "decision" | "end";
+
+type WorkflowNode = {
+  id: string;
+  type: WorkflowNodeType;
+  label: string;
+  description: string;
+  period: string;
+  processingDays: string;
+  procedures: string[];
+  requiredDocs: string[];
+  outputs: string[];
+  collaborators: string[];
+  notes: string[];
+};
+
+type WorkflowColumn = {
+  id: string;
+  top: WorkflowNode[];
+  bottom: WorkflowNode | null;
+};
+
 export default function InsightsPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -239,6 +261,8 @@ function ResultView({ result }: { result: CombinedResult }) {
   const timeline = useMemo(() => parseTimeline(result.insights.workflow_mermaid), [result.insights.workflow_mermaid]);
   const classifications = result.insights.classifications ?? [];
   const workItems = result.insights.work_items ?? fallbackWorkItems(classifications);
+  const workflowNodes = useMemo(() => buildWorkflowNodes(workItems), [workItems]);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const calendarDrafts = result.insights.calendar_drafts ?? [];
   const recurring = result.hermes.recurring_work ?? [];
   const drafts = result.hermes.drafts ?? [];
@@ -265,8 +289,10 @@ function ResultView({ result }: { result: CombinedResult }) {
       </section>
 
       <section className="glass" style={widePanel}>
-        <PanelHeader title="업무흐름도" meta={`${timeline.length}단계`} />
-        {timeline.length > 0 ? <Timeline items={timeline} /> : <pre style={codeBox}>{result.insights.workflow_mermaid}</pre>}
+        <PanelHeader title="업무흐름도" meta={`${workflowNodes.length || timeline.length}단계`} />
+        {workflowNodes.length > 0
+          ? <WorkflowBoard nodes={workflowNodes} selectedId={selectedWorkflowId} onSelect={setSelectedWorkflowId} />
+          : timeline.length > 0 ? <Timeline items={timeline} /> : <pre style={codeBox}>{result.insights.workflow_mermaid}</pre>}
         <details style={{ marginTop: 14 }}>
           <summary style={detailsSummary}>Mermaid 원문</summary>
           <pre style={codeBox}>{result.insights.workflow_mermaid}</pre>
@@ -393,6 +419,119 @@ function ResultView({ result }: { result: CombinedResult }) {
         </section>
       )}
     </div>
+  );
+}
+
+function WorkflowBoard({
+  nodes,
+  selectedId,
+  onSelect,
+}: {
+  nodes: WorkflowNode[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
+  const columns = useMemo(() => buildWorkflowColumns(nodes), [nodes]);
+
+  function renderCard(node: WorkflowNode, displayIndex: number) {
+    const selectedClass = selected.id === node.id ? " workflow-board-card--selected" : "";
+
+    return (
+      <button
+        type="button"
+        className={`workflow-board-card workflow-board-card--${node.type}${selectedClass}`}
+        onClick={() => onSelect(node.id)}
+        aria-pressed={selected.id === node.id}
+      >
+        <div className="workflow-board-card-top">
+          <span className={`workflow-board-index workflow-board-index--${node.type}`}>{displayIndex}</span>
+          <span className="workflow-board-type">{workflowNodeType(node.type)}</span>
+          {node.processingDays && <span className="workflow-board-days">{node.processingDays}</span>}
+        </div>
+        <strong>{node.label}</strong>
+        <span>{node.period}</span>
+        <div className="workflow-board-pills">
+          {node.procedures.length > 0 && <span>절차 {node.procedures.length}</span>}
+          {node.requiredDocs.length > 0 && <span>서류 {node.requiredDocs.length}</span>}
+          {node.outputs.length > 0 && <span>산출 {node.outputs.length}</span>}
+          {node.collaborators.length > 0 && <span>협조 {node.collaborators.length}</span>}
+        </div>
+      </button>
+    );
+  }
+
+  return (
+    <div className="workflow-board">
+      <div className="workflow-board-lane" aria-label="업무흐름도 단계">
+        {columns.map((column, index) => (
+          <div className="workflow-board-step" key={column.id}>
+            <div className="workflow-board-column">
+              {column.top.length > 0 && (
+                <div className="workflow-board-column-top">
+                  {column.top.map((node) => renderCard(node, nodes.findIndex((candidate) => candidate.id === node.id) + 1))}
+                  <span className="workflow-board-connector" aria-hidden="true" />
+                </div>
+              )}
+              {column.bottom
+                ? renderCard(column.bottom, nodes.findIndex((candidate) => candidate.id === column.bottom?.id) + 1)
+                : <div className="workflow-board-empty" />}
+            </div>
+            {index < columns.length - 1 && <WorkflowArrow />}
+          </div>
+        ))}
+      </div>
+
+      {selected && <WorkflowDetail node={selected} />}
+    </div>
+  );
+}
+
+function WorkflowArrow() {
+  return (
+    <span className="workflow-board-arrow" aria-hidden="true">
+      <svg width="22" height="12" viewBox="0 0 22 12" fill="none">
+        <path d="M1 6h18M15 2l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+function WorkflowDetail({ node }: { node: WorkflowNode }) {
+  return (
+    <article className={`workflow-board-detail workflow-board-detail--${node.type}`}>
+      <div className="workflow-board-detail-head">
+        <span className="workflow-board-type">{workflowNodeType(node.type)}</span>
+        <h3>{node.label}</h3>
+        {node.processingDays && <span className="workflow-board-days">{node.processingDays}</span>}
+      </div>
+      <p>{node.description}</p>
+      <div className="workflow-board-detail-grid">
+        <WorkflowDetailList title="업무처리 절차" items={node.procedures} ordered />
+        <WorkflowDetailList title="필요서류" items={node.requiredDocs} />
+        <WorkflowDetailList title="산출물" items={node.outputs} />
+        <WorkflowDetailList title="협조부서" items={node.collaborators} />
+      </div>
+      {node.notes.length > 0 && (
+        <div className="workflow-board-notes">
+          {node.notes.map((note) => <span key={note}>{note}</span>)}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function WorkflowDetailList({ title, items, ordered = false }: { title: string; items: string[]; ordered?: boolean }) {
+  if (items.length === 0) return null;
+  const List = ordered ? "ol" : "div";
+
+  return (
+    <section className="workflow-board-detail-list">
+      <h4>{title}</h4>
+      <List>
+        {items.map((item) => ordered ? <li key={item}>{item}</li> : <span key={item}>{item}</span>)}
+      </List>
+    </section>
   );
 }
 
@@ -548,6 +687,102 @@ function sourceSummary(draft: CalendarDraft): string {
   const count = draft.source_document_ids?.length ?? labels.length;
   const label = labels[0] ?? draft.source_label;
   return count > 1 ? `${label} 외 ${count - 1}개 원문 병합` : label;
+}
+
+function buildWorkflowNodes(workItems: WorkItem[]): WorkflowNode[] {
+  const ordered = [...workItems].sort((a, b) => {
+    const aDate = a.start_date ?? "9999-12-31";
+    const bDate = b.start_date ?? "9999-12-31";
+    return aDate.localeCompare(bDate) || a.work_title.localeCompare(b.work_title, "ko");
+  });
+
+  return ordered.map((item, index) => {
+    const docs = item.documents ?? [];
+    const docTypes = uniqueStrings(item.document_types.length ? item.document_types : docs.map((doc) => doc.document_type));
+    const filenames = uniqueStrings(docs.map((doc) => doc.filename ?? doc.label)).slice(0, 6);
+    const collaborators = uniqueStrings(docs.map((doc) => departmentFromLabel(doc.label))).slice(0, 5);
+    const period = dateRange(item.start_date, item.end_date);
+    const procedures = docs.slice(0, 5).map((doc, docIndex) => {
+      const date = doc.doc_date ?? "날짜 미상";
+      const title = doc.filename ?? doc.label ?? `문서 ${docIndex + 1}`;
+      return `${date} · ${doc.document_type} · ${title}`;
+    });
+
+    return {
+      id: item.work_id || `${item.work_title}-${index}`,
+      type: workflowTypeFor(item, index, ordered.length),
+      label: item.work_title || item.task_category || `업무 ${index + 1}`,
+      description: `${item.task_category || "미분류"} 업무로 묶인 ${item.document_count}개 문서의 처리 단계입니다.`,
+      period,
+      processingDays: workflowDuration(item.start_date, item.end_date),
+      procedures,
+      requiredDocs: docTypes.slice(0, 6),
+      outputs: filenames,
+      collaborators,
+      notes: [
+        item.year ? `${item.year}년 기준` : "",
+        item.document_count > 1 ? `원문 ${item.document_count}개 병합` : "원문 1개",
+      ].filter(Boolean),
+    };
+  });
+}
+
+function buildWorkflowColumns(nodes: WorkflowNode[]): WorkflowColumn[] {
+  const columns: WorkflowColumn[] = [];
+  let pendingDecisions: WorkflowNode[] = [];
+
+  for (const node of nodes) {
+    if (node.type === "decision") {
+      pendingDecisions.push(node);
+      continue;
+    }
+    columns.push({ id: node.id, top: pendingDecisions, bottom: node });
+    pendingDecisions = [];
+  }
+
+  if (pendingDecisions.length > 0) {
+    columns.push({ id: pendingDecisions[0].id, top: pendingDecisions, bottom: null });
+  }
+
+  return columns;
+}
+
+function workflowTypeFor(item: WorkItem, index: number, total: number): WorkflowNodeType {
+  if (index === 0) return "start";
+  if (index === total - 1) return "end";
+
+  const text = `${item.work_title} ${item.task_category} ${item.document_types.join(" ")}`;
+  const decisionKeywords = ["심사", "평가", "검토", "면접", "시험", "선발", "결과", "승인", "변경"];
+  return decisionKeywords.some((keyword) => text.includes(keyword)) || item.document_count > 2 ? "decision" : "step";
+}
+
+function workflowNodeType(type: WorkflowNodeType): string {
+  return {
+    start: "START",
+    step: "STEP",
+    decision: "DECISION",
+    end: "END",
+  }[type];
+}
+
+function workflowDuration(start?: string | null, end?: string | null): string {
+  if (!start && !end) return "";
+  if (!start || !end || start === end) return "당일";
+
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  const diffMs = endDate.getTime() - startDate.getTime();
+  const days = Math.round(diffMs / 86_400_000) + 1;
+  return Number.isFinite(days) && days > 0 && days < 366 ? `${days}일` : "";
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
+}
+
+function departmentFromLabel(label?: string | null): string {
+  const first = label?.split("·")[0]?.trim() ?? "";
+  return first && !first.includes(".") ? first : "";
 }
 
 const accountRow: CSSProperties = {

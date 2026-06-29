@@ -21,6 +21,11 @@ test("insights page wires Phase 4 and Phase 5 APIs into the web UI", () => {
   assert.match(source, /report_workflow/);
   assert.match(source, /recurring_work/);
   assert.match(source, /drafts/);
+  assert.match(source, /WorkflowBoard/);
+  assert.match(source, /buildWorkflowNodes/);
+  assert.match(source, /workflow-board-lane/);
+  assert.match(source, /workflow-board-card/);
+  assert.match(source, /workflow-board-detail/);
   assert.match(source, /hwpx_filename/);
   assert.match(source, /HWPX 다운로드/);
 });
