@@ -63,6 +63,7 @@ function Frame({ children }: { children: React.ReactNode }) {
           <strong>관리자</strong>
           <a href="/" style={link}>챗봇</a>
           <a href="/search" style={link}>문서 검색</a>
+          <a href="/insights" style={link}>업무 활용</a>
         </div>
       </nav>
       <header style={header}>

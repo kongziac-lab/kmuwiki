@@ -30,6 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <nav>
           <a className="navlink active" href="/">챗봇</a>
           <a className="navlink" href="/search">문서 검색</a>
+          <a className="navlink" href="/insights">업무 활용</a>
           <a className="navlink" href="/admin">관리자</a>
         </nav>
       </div>

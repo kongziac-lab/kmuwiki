@@ -65,7 +65,7 @@ body {
   box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.5);
 }
 .topnav .brand { font-weight: 700; letter-spacing: -0.01em; }
-.topnav nav { display: flex; gap: 6px; }
+.topnav nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .navlink {
   color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500;
   padding: 7px 14px; border-radius: 999px; transition: all 0.4s var(--ease);
@@ -151,5 +151,6 @@ a:hover { text-decoration: underline; }
 
 @media (max-width: 720px) {
   .page { padding: 18px 14px 60px; }
-  .topnav { border-radius: 20px; }
+  .topnav { border-radius: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .navlink { padding: 6px 10px; }
 }
