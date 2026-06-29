@@ -9,6 +9,8 @@
 |---|---|
 | `ingest/` | Python 인제스트 워커 — 잠금탐지·파싱·**마스킹**·임베딩·Supabase 적재 (Phase 1) |
 | `ingest/kmu_query/` | 검색·RAG 코어 — 하이브리드 검색·RLS·Claude 답변 (Phase 2) |
+| `ingest/kmu_query/insights.py` | 분류·흐름도·일정·보고서 초안 코어 (Phase 4) |
+| `ingest/kmu_query/hermes.py` | 반복업무 탐지·안전한 문서 초안·변경 보고 코어 (Phase 5) |
 | `ingest/evaluation/` | 마스킹 품질 평가 하네스(골든셋·재현율 게이트) |
 | `supabase/migrations/` | DB 스키마·pgvector·RLS·하이브리드 검색 RPC |
 | `web/` | Next.js 검색·챗봇 UI (Vercel 배포 대상) |
@@ -21,6 +23,7 @@
 
 ## 빠른 시작
 - 인제스트: `cd ingest && python -m kmu_ingest.cli run --dry-run`
+- 백필: `cd ingest && python -m kmu_ingest.cli backfill --dry-run`
 - 테스트: `cd ingest && python -m unittest discover -s tests`
 - 마스킹 평가: `cd ingest && python -m evaluation.evaluate`
 - 검색 API: `cd ingest && uvicorn kmu_query.service:app --port 8000`

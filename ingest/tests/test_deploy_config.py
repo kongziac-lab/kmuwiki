@@ -20,12 +20,17 @@ class TestUnifiedVercelServicesConfig(unittest.TestCase):
         proxy = (ROOT / "web/lib/ragProxy.ts").read_text()
         chat_route = (ROOT / "web/app/api/chat/route.ts").read_text()
         search_route = (ROOT / "web/app/api/search/route.ts").read_text()
+        insights_route = (ROOT / "web/app/api/insights/route.ts").read_text()
+        hermes_route = (ROOT / "web/app/api/hermes/route.ts").read_text()
 
         self.assertIn("process.env.NEXT_PUBLIC_RAG_URL", proxy)
         self.assertIn("new URL(requestUrl).origin", proxy)
         self.assertIn("resolveRagBase(req.url)", chat_route)
         self.assertIn("resolveRagBase(req.url)", search_route)
-        self.assertNotIn("kmuwiki-api.vercel.app", proxy + chat_route + search_route)
+        self.assertIn("resolveRagBase(req.url)", insights_route)
+        self.assertIn("resolveRagBase(req.url)", hermes_route)
+        self.assertNotIn("kmuwiki-api.vercel.app",
+                         proxy + chat_route + search_route + insights_route + hermes_route)
 
 
 if __name__ == "__main__":

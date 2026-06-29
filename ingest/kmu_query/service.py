@@ -20,6 +20,8 @@ from kmu_ingest.config import load_settings
 from kmu_ingest.embedding import make_embedder
 
 from . import rag
+from . import insights
+from . import hermes
 from .retriever import Retriever
 
 settings = load_settings()
@@ -94,3 +96,45 @@ async def chat(
         yield sse("done", {})
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/insights")
+async def build_insights(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    body = await req.json()
+    query = body.get("query", "")
+    sources = _retriever(authorization).retrieve(
+        query, int(body.get("k", 12)), body.get("dept"))
+    return JSONResponse({
+        "classifications": [insights.classify_source(s) for s in sources],
+        "workflow_mermaid": insights.build_mermaid_timeline(sources),
+        "calendar_drafts": insights.build_calendar_drafts(sources),
+        "report_draft": insights.draft_report(query, sources),
+    })
+
+
+@app.post("/hermes")
+async def hermes_report(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    body = await req.json()
+    query = body.get("query", "")
+    known = set(body.get("known_document_ids") or [])
+    target_year = body.get("target_year")
+    sources = _retriever(authorization).retrieve(
+        query, int(body.get("k", 12)), body.get("dept"))
+    drafts = []
+    if isinstance(target_year, int):
+        drafts = [hermes.draft_next_year_document(source, target_year) for source in sources[:3]]
+    return JSONResponse({
+        "update_report": hermes.update_report(query, sources, known_document_ids=known),
+        "recurring_work": hermes.detect_recurring_work(sources),
+        "drafts": drafts,
+    })

@@ -2,6 +2,7 @@ import unittest
 
 from kmu_ingest.config import EMBED_DIM, Settings
 from kmu_ingest.embedding import make_embedder
+from kmu_ingest.hashing import sha256_bytes
 from kmu_ingest.models import Chunk
 from kmu_ingest.models import DocStatus
 from kmu_ingest.ocr import OCREngine
@@ -115,6 +116,26 @@ class TestPipeline(unittest.TestCase):
         deps = make_deps()  # ocr backend none
         st = process(item("scan.png", b"\x89PNG\r\n\x1a\n fake"), deps)
         self.assertEqual(st, DocStatus.PENDING_OCR)
+
+    def test_backfill_can_reprocess_pending_ocr_when_explicitly_allowed(self):
+        store = CapturingStore()
+        data = b"\x89PNG\r\n\x1a\n fake"
+        store._docs[sha256_bytes(data)] = DocStatus.PENDING_OCR.value
+        deps = Deps(
+            settings=Settings(dry_run=True, embed_provider="fake"),
+            store=store,
+            masker=Masker(enable_ner=False),
+            ocr=OCREngine("none"),
+            embedder=make_embedder("fake", "fake-deterministic", "v1"),
+            reprocess_statuses={DocStatus.PENDING_OCR.value},
+        )
+        deps.ocr.available = True
+        deps.ocr.image_to_text = lambda _data: "OCR 본문"
+
+        st = process(item("scan.png", data), deps)
+
+        self.assertEqual(st, DocStatus.PROCESSED)
+        self.assertEqual(len(store.chunks), 1)
 
     def test_boilerplate_and_meta_prefix_are_excluded_from_embedding_text(self):
         store = CapturingStore()

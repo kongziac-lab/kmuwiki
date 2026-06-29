@@ -13,6 +13,8 @@
 - `app/search/page.tsx` — 키워드/하이브리드 검색 UI. 권한 범위 내 마스킹 청크와 출처 메타 표시.
 - `app/api/chat/route.ts` — Python `/chat` 으로 스트리밍 프록시. 사용자 JWT 전달(RLS 적용), Python URL은 서버 전용.
 - `app/api/search/route.ts` — Python `/search` JSON 프록시. `/api/chat`과 같은 RLS/공유 시크릿 경로 사용.
+- `app/api/insights/route.ts` — Python `/insights` 프록시. 분류·흐름도·일정·보고서 초안.
+- `app/api/hermes/route.ts` — Python `/hermes` 프록시. 반복업무 탐지·안전한 문서 초안·변경 보고.
 - `lib/ragProxy.ts` — Vercel Services(`/rag`)와 로컬 FastAPI(`PY_API_URL`) 경로 계산 및 공유 시크릿 헤더 구성.
 - `lib/supabase.ts` — 브라우저 Supabase 클라이언트(세션 토큰 획득).
 

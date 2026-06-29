@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .config import Settings
+from .backfill import BACKFILL_STATUSES, backfill_candidates
 from .models import Chunk, FileMeta
 
 
@@ -43,6 +44,9 @@ class DryRunStore:
         embeddings: list[list[float]], model: str, version: str,
     ) -> None:
         print(f"  [chunks] {len(chunks)}개 임베딩 적재 (model={model}/{version}, dim={len(embeddings[0]) if embeddings else 0})")
+
+    def list_backfill_candidates(self, limit: int = 100):
+        return []
 
 
 class SupabaseStore:
@@ -101,6 +105,14 @@ class SupabaseStore:
         } for ch, emb in zip(chunks, embeddings)]
         if rows:
             self.c.table("doc_chunks").insert(rows).execute()
+
+    def list_backfill_candidates(self, limit: int = 100):
+        r = (self.c.table("documents")
+             .select("id,sha256,status,path_in_zip,filename,zip_archives(filename)")
+             .in_("status", sorted(BACKFILL_STATUSES))
+             .limit(limit)
+             .execute())
+        return backfill_candidates(r.data or [])
 
 
 def make_store(settings: Settings):

@@ -295,6 +295,10 @@ Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. 
 
 ## Phase 3 — 로컬 GPU 서버 + 백필 (비번 해제 / OCR)
 
+> 구현 현황: `python -m kmu_ingest.cli backfill` 추가. `pending_password`·`pending_ocr`만 조회하며,
+> `processed` 문서는 재처리하지 않는다. 비밀번호 자동 시도는 사전 파일의 bounded list로 제한하고,
+> 지원하지 않는 파일 내부 암호/소스 누락은 `backfill-manual-queue.jsonl` 수동 큐로 격리한다.
+
 ### 무엇을 구현하나
 로컬 GPU 서버 구축 후, `pending_password`·`pending_ocr` 파일만 골라 처리하는 백필 워커.
 
@@ -321,6 +325,9 @@ Next.js 웹에서 키워드/벡터 하이브리드 검색과 RAG 챗봇 제공. 
 
 ## Phase 4 — 활용 기능 (분류 · 흐름도 · 연간일정 · 보고서)
 
+> 구현 현황: `kmu_query.insights`와 `/rag/insights`(`/api/insights` 프록시) 추가.
+> 검색 결과 기반 업무 분류, Mermaid 업무흐름도, 일정 draft, 출처 포함 보고서 draft를 생성한다.
+
 ### 무엇을 구현하나
 DB를 기반으로 업무별 구분, 업무흐름도, 연간일정(구글 연동), 보고서 작성 보조.
 
@@ -342,6 +349,10 @@ DB를 기반으로 업무별 구분, 업무흐름도, 연간일정(구글 연동
 ---
 
 ## Phase 5 — Hermes Agent + 반복업무 문서 자동생성
+
+> 구현 현황: `kmu_query.hermes`와 `/rag/hermes`(`/api/hermes` 프록시) 추가.
+> 반복업무 탐지, 변경 보고, 다음 연도 문서 draft 생성을 제공한다. 생성물은 항상 draft이며
+> 전화·이메일·주민번호는 자리표시자로 치환한다.
 
 ### 무엇을 구현하나
 업무를 체계화·업데이트하는 에이전트와, 매년 반복되는 업무 문서의 자동 생성.

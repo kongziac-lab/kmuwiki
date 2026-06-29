@@ -38,6 +38,7 @@ class WorkItem:
     data: bytes
     zip_entry_encrypted: bool
     zip_fields: dict = field(default_factory=dict)  # ZIP 단위 상속 메타(§7.B)
+    sha256_override: str | None = None              # 백필: 기존 pending row 를 같은 sha 로 갱신
 
 
 @dataclass
@@ -47,16 +48,20 @@ class Deps:
     masker: Masker
     ocr: OCREngine
     embedder: object
+    reprocess_statuses: set[str] = field(default_factory=set)
 
 def process(item: WorkItem, deps: Deps) -> DocStatus:
     store = deps.store
     # 콘텐츠 해시(멱등성 키). 잠긴 엔트리는 본문이 없으므로 ZIP해시+경로로 안정 식별.
-    sha = (sha256_bytes(item.data) if item.data
-           else sha256_bytes(f"{item.zip_sha256}:{item.path_in_zip}".encode()))
+    sha = item.sha256_override or (
+        sha256_bytes(item.data) if item.data
+        else sha256_bytes(f"{item.zip_sha256}:{item.path_in_zip}".encode())
+    )
 
     # 1) 멱등성 (불변식 4): 이미 끝난 것은 재처리 안 함
     existing = store.document_status(sha)
-    if existing in ("processed", "superseded", "revoked", "pending_password", "pending_ocr"):
+    if (existing in ("processed", "superseded", "revoked", "pending_password", "pending_ocr")
+            and existing not in deps.reprocess_statuses):
         return DocStatus(existing)
 
     # ZIP 단위 메타(부서·문서번호·시행일)를 파일에 상속(§7.B). dept 미상이면 None=관리자 전용.
