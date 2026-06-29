@@ -97,14 +97,14 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
   }
 
   return (
-    <form onSubmit={submit} style={loginBox}>
-      <h2 style={{ margin: 0, fontSize: 18 }}>로그인</h2>
-      <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일"
-        autoComplete="username" style={input} />
-      <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호"
-        type="password" autoComplete="current-password" style={input} />
-      <button disabled={busy} style={button}>{busy ? "확인 중..." : "로그인"}</button>
-      {err && <p style={errorText}>{err}</p>}
+    <form onSubmit={submit} className="glass" style={{ display: "grid", gap: 12, maxWidth: 380 }}>
+      <h2>로그인</h2>
+      <input className="input" value={email} onChange={(e) => setEmail(e.target.value)}
+        placeholder="이메일" autoComplete="username" />
+      <input className="input" value={pw} onChange={(e) => setPw(e.target.value)}
+        placeholder="비밀번호" type="password" autoComplete="current-password" />
+      <button className="btn btn-primary" disabled={busy}>{busy ? "확인 중…" : "로그인"}</button>
+      {err && <p className="error">{err}</p>}
     </form>
   );
 }
@@ -328,7 +328,6 @@ const link: React.CSSProperties = { color: "#7aa2ff", textDecoration: "none", fo
 const header: React.CSSProperties = { margin: "28px 0 18px" };
 const title: React.CSSProperties = { margin: 0, fontSize: 36, letterSpacing: "-0.02em", fontWeight: 800 };
 const muted: React.CSSProperties = { color: "#9aa6d6", margin: "8px 0 0" };
-const loginBox: React.CSSProperties = { marginTop: 24, display: "grid", gap: 12, maxWidth: 360, background: GLASS, border: HAIR, borderRadius: 22, padding: 26, backdropFilter: "blur(22px)", WebkitBackdropFilter: "blur(22px)" };
 const input: React.CSSProperties = { padding: "13px 16px", fontSize: 15, color: "#eef2ff", background: "rgba(255,255,255,0.04)", border: HAIR, borderRadius: 14 };
 const button: React.CSSProperties = { padding: "12px 22px", fontSize: 15, fontWeight: 600, color: "#0a0f2c", background: "linear-gradient(180deg,#aac4ff,#5b8bff)", border: "none", borderRadius: 999, cursor: "pointer" };
 const smallButton: React.CSSProperties = { padding: "7px 14px", fontSize: 13, color: "#eef2ff", background: "rgba(255,255,255,0.09)", border: HAIR, borderRadius: 999, cursor: "pointer" };

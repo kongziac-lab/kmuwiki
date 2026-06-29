@@ -69,14 +69,14 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 24, display: "grid", gap: 8, maxWidth: 320 }}>
-      <h3 style={{ margin: 0 }}>로그인</h3>
-      <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일"
-        autoComplete="username" style={inp} />
-      <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호"
-        type="password" autoComplete="current-password" style={inp} />
-      <button disabled={busy} style={btn}>{busy ? "확인 중..." : "로그인"}</button>
-      {err && <p style={{ color: "#ff7a8a", fontSize: 13 }}>{err}</p>}
+    <form onSubmit={submit} className="glass" style={{ display: "grid", gap: 12, maxWidth: 380 }}>
+      <h2>로그인</h2>
+      <input className="input" value={email} onChange={(e) => setEmail(e.target.value)}
+        placeholder="이메일" autoComplete="username" />
+      <input className="input" value={pw} onChange={(e) => setPw(e.target.value)}
+        placeholder="비밀번호" type="password" autoComplete="current-password" />
+      <button className="btn btn-primary" disabled={busy}>{busy ? "확인 중…" : "로그인"}</button>
+      {err && <p className="error">{err}</p>}
     </form>
   );
 }
