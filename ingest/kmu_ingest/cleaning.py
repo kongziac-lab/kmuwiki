@@ -21,10 +21,33 @@ _DROP = [
     re.compile(r'^접수\s*\(\s*\)\s*$'),
 ]
 
+_INLINE_SUBS = [
+    re.compile(r'["“”\']?\s*진리와\s*정의와\s*사랑의\s*나라를\s*위하여\s*["“”\']?'),
+    re.compile(r'\b수신자?\s*내부결재\b'),
+    re.compile(r'\(\s*경\s*유\s*\)'),
+    re.compile(r'본\s*서식은\s*표제부입니다\.?'),
+    re.compile(r'본문\s*내용은\s*본문부를\s*이용하시기\s*바랍니다\.?'),
+    re.compile(r'본문\s*내용에\s*대한\s*의견이\s*있는\s*경우에만\s*아래에\s*기재\s*합니다\.?'),
+    re.compile(
+        r'협조자\s+'
+        r'(?:[^\n]{0,120}?)?'
+        r'시행\s+[가-힣][가-힣A-Za-z0-9 ]*?(?:팀|처|과|부|원|실|단|관|위원회)\s*-\s*\d+'
+        r'\s*\([^)]*\)\s*접수\s*(?:\([^)]*\))?'
+    ),
+    re.compile(
+        r'시행\s+[가-힣][가-힣A-Za-z0-9 ]*?(?:팀|처|과|부|원|실|단|관|위원회)\s*-\s*\d+'
+        r'\s*\([^)]*\)\s*접수\s*(?:\([^)]*\))?'
+    ),
+    re.compile(r'\b전화\s+\d{2,4}-\d{3,4}-\d{4}\s+전송\s+\[이메일\]\s+부분공개\(\d+\)'),
+]
+
 
 def strip_boilerplate(text: str | None) -> str:
     if not text:
         return text or ""
-    kept = [ln for ln in text.splitlines()
+    cleaned = text.replace("\xa0", " ")
+    for pattern in _INLINE_SUBS:
+        cleaned = pattern.sub(" ", cleaned)
+    kept = [ln for ln in cleaned.splitlines()
             if not any(p.match(ln.strip()) for p in _DROP)]
-    return "\n".join(kept).strip()
+    return re.sub(r"[ \t]{2,}", " ", "\n".join(kept)).strip()
