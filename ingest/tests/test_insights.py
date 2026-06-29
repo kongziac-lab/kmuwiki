@@ -36,6 +36,20 @@ def duplicate_business_sources():
     ]
 
 
+def cross_semester_business_sources():
+    return [
+        Source("fall-exam", 0, "2026학년도 2학기 해외 파견 교환학생 후보 선발 시험을 실시한다.", 0.92,
+               filename="2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+               doc_no="국제교류팀-1843", doc_date="2026-02-27", dept="국제교류팀"),
+        Source("spring-exam", 0, "2026학년도 1학기 해외 파견 교환학생 후보 선발 시험을 실시한다.", 0.91,
+               filename="2026학년도 1학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+               doc_no="국제교류팀-124", doc_date="2026-03-18", dept="국제교류팀"),
+        Source("spring-interview", 0, "2026학년도 1학기 해외 파견 교환학생 후보 면접전형을 실시한다.", 0.9,
+               filename="붙임 5. 서류전형 합격자 대상 면접전형 안내문(홈페이지).hwp",
+               doc_no="국제교류팀-155", doc_date="2026-03-23", dept="국제교류팀"),
+    ]
+
+
 class TestInsights(unittest.TestCase):
     def test_classifies_exchange_interview_documents(self):
         label = classify_source(sources()[0])
@@ -54,10 +68,27 @@ class TestInsights(unittest.TestCase):
         groups = group_work_items(duplicate_business_sources())
 
         self.assertEqual(len(groups), 1)
-        self.assertEqual(groups[0]["work_title"], "2026학년도 2학기 해외 파견 교환학생 후보 선발")
+        self.assertEqual(groups[0]["work_title"], "해외 파견 교환학생 후보 선발")
         self.assertEqual(groups[0]["task_category"], "교환학생 선발")
         self.assertEqual(groups[0]["document_count"], 3)
         self.assertEqual(set(groups[0]["document_types"]), {"시험"})
+        self.assertEqual(groups[0]["years"], [2026])
+        self.assertEqual(groups[0]["semesters"], [2])
+
+    def test_groups_same_business_across_semesters_as_terms(self):
+        groups = group_work_items(cross_semester_business_sources())
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["work_title"], "해외 파견 교환학생 후보 선발")
+        self.assertEqual(groups[0]["years"], [2026])
+        self.assertEqual(groups[0]["semesters"], [1, 2])
+        self.assertEqual(groups[0]["terms"], ["2026학년도 1학기", "2026학년도 2학기"])
+        self.assertEqual(groups[0]["document_count"], 3)
+        self.assertEqual(set(groups[0]["document_types"]), {"시험", "면접"})
+
+        labels = classify_source(cross_semester_business_sources()[1])
+        self.assertEqual(labels["work_title"], "해외 파견 교환학생 후보 선발")
+        self.assertEqual(labels["semester"], 1)
 
     def test_mermaid_timeline_collapses_duplicate_renderings(self):
         mermaid = build_mermaid_timeline(duplicate_business_sources())

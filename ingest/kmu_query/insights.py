@@ -20,6 +20,8 @@ _SPACE_RE = re.compile(r"\s+")
 
 def classify_source(source: Source) -> dict:
     text = f"{source.filename or ''} {source.content}"
+    year = _year(source)
+    semester = _semester(text)
     category = "일반 행정"
     if "교환학생" in text or "파견" in text or "면접전형" in text or "서류전형" in text:
         category = "교환학생 선발"
@@ -44,7 +46,9 @@ def classify_source(source: Source) -> dict:
         "document_id": source.document_id,
         "task_category": category,
         "document_type": document_type,
-        "year": _year(source),
+        "year": year,
+        "semester": semester,
+        "term": _term_label(year, semester),
         "work_id": _work_id(source),
         "work_title": _work_title(source),
         "label": source.label(),
@@ -62,6 +66,9 @@ def group_work_items(sources: list[Source]) -> list[dict]:
             "work_title": classification["work_title"],
             "task_category": classification["task_category"],
             "year": classification["year"],
+            "years": [],
+            "semesters": [],
+            "terms": [],
             "start_date": source.doc_date,
             "end_date": source.doc_date,
             "document_count": 0,
@@ -73,6 +80,12 @@ def group_work_items(sources: list[Source]) -> list[dict]:
             continue
         seen.add(source.document_id)
         row["document_count"] += 1
+        if classification["year"] and classification["year"] not in row["years"]:
+            row["years"].append(classification["year"])
+        if classification["semester"] and classification["semester"] not in row["semesters"]:
+            row["semesters"].append(classification["semester"])
+        if classification["term"] and classification["term"] not in row["terms"]:
+            row["terms"].append(classification["term"])
         if classification["document_type"] not in row["document_types"]:
             row["document_types"].append(classification["document_type"])
         if source.doc_date and (row["start_date"] is None or source.doc_date < row["start_date"]):
@@ -86,9 +99,15 @@ def group_work_items(sources: list[Source]) -> list[dict]:
             "doc_no": source.doc_no,
             "doc_date": source.doc_date,
             "filename": source.filename,
+            "year": classification["year"],
+            "semester": classification["semester"],
         })
 
     for row in grouped.values():
+        row["years"] = sorted(row["years"])
+        row["semesters"] = sorted(row["semesters"])
+        row["terms"] = sorted(row["terms"], key=_term_sort_key)
+        row["year"] = row["years"][0] if len(row["years"]) == 1 else None
         row["document_types"] = sorted(row["document_types"], key=_document_type_sort_key)
         row["documents"] = sorted(row["documents"], key=lambda d: (d["doc_date"] or "9999-12-31", d["doc_no"] or "", d["filename"] or ""))
     return sorted(grouped.values(), key=lambda r: (r["start_date"] or "9999-12-31", r["work_title"]))
@@ -234,19 +253,14 @@ def _timeline_events(sources: list[Source]) -> list[dict]:
 
 def _work_title(source: Source) -> str:
     text = f"{source.filename or ''} {source.content}"
-    year = _year(source)
-    semester = _semester(text)
-    prefix = f"{year}학년도 " if year else ""
-    if semester:
-        prefix += f"{semester}학기 "
     if "교환학생" in text and ("파견" in text or "해외" in text):
-        return f"{prefix}해외 파견 교환학생 후보 선발".strip()
+        return "해외 파견 교환학생 후보 선발"
     if "초청" in text and "교환학생" in text:
-        return f"{prefix}초청 교환학생 운영".strip()
+        return "초청 교환학생 운영"
     if "출장" in text:
-        return f"{prefix}국외 출장".strip()
+        return "국외 출장"
     if "대표단" in text or "내방" in text:
-        return f"{prefix}대외 교류".strip()
+        return "대외 교류"
     return _compact(_strip_file_noise(source.filename or source.doc_no or source.document_id[:8]), 80)
 
 
@@ -260,6 +274,24 @@ def _semester(text: str) -> int | None:
         return None
     value = int(match.group(1))
     return value if 1 <= value <= 4 else None
+
+
+def _term_label(year: int | None, semester: int | None) -> str | None:
+    if year and semester:
+        return f"{year}학년도 {semester}학기"
+    if year:
+        return f"{year}학년도"
+    if semester:
+        return f"{semester}학기"
+    return None
+
+
+def _term_sort_key(term: str) -> tuple[int, int, str]:
+    year_match = re.search(r"20\d{2}", term)
+    semester_match = re.search(r"(\d)\s*학기", term)
+    year = int(year_match.group(0)) if year_match else 9999
+    semester = int(semester_match.group(1)) if semester_match else 99
+    return (year, semester, term)
 
 
 def _strip_file_noise(text: str) -> str:

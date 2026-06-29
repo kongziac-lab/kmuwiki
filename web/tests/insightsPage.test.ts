@@ -23,6 +23,10 @@ test("insights page wires Phase 4 and Phase 5 APIs into the web UI", () => {
   assert.match(source, /drafts/);
   assert.match(source, /WorkflowBoard/);
   assert.match(source, /buildWorkflowNodes/);
+  assert.match(source, /buildWorkflowStageNodes/);
+  assert.match(source, /stageWorkflowKey/);
+  assert.match(source, /termSummary/);
+  assert.match(source, /학년도\/학기/);
   assert.match(source, /workflow-board-lane/);
   assert.match(source, /workflow-board-card/);
   assert.match(source, /workflow-board-detail/);

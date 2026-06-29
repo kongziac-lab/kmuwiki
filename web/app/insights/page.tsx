@@ -9,6 +9,7 @@ type Classification = {
   task_category: string;
   document_type: string;
   year?: number | null;
+  semester?: number | null;
   work_id?: string;
   work_title?: string;
   label: string;
@@ -21,6 +22,8 @@ type WorkDocument = {
   doc_no?: string | null;
   doc_date?: string | null;
   filename?: string | null;
+  year?: number | null;
+  semester?: number | null;
 };
 
 type WorkItem = {
@@ -28,6 +31,9 @@ type WorkItem = {
   work_title: string;
   task_category: string;
   year?: number | null;
+  years?: number[];
+  semesters?: number[];
+  terms?: string[];
   start_date?: string | null;
   end_date?: string | null;
   document_count: number;
@@ -127,6 +133,25 @@ type WorkflowColumn = {
   id: string;
   top: WorkflowNode[];
   bottom: WorkflowNode | null;
+};
+
+type WorkflowStageDocument = WorkDocument & {
+  workTitle: string;
+  taskCategory: string;
+  term: string;
+};
+
+type WorkflowStage = {
+  key: string;
+  label: string;
+  order: number;
+  workTitles: string[];
+  taskCategories: string[];
+  documentTypes: string[];
+  documents: WorkflowStageDocument[];
+  terms: string[];
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 export default function InsightsPage() {
@@ -307,6 +332,7 @@ function ResultView({ result }: { result: CombinedResult }) {
               <thead>
                 <tr>
                   <th>업무</th>
+                  <th>학년도/학기</th>
                   <th>분류</th>
                   <th>유형</th>
                   <th>기간</th>
@@ -317,6 +343,7 @@ function ResultView({ result }: { result: CombinedResult }) {
                 {workItems.map((row) => (
                   <tr key={row.work_id}>
                     <td>{row.work_title}</td>
+                    <td>{termSummary(row)}</td>
                     <td>{row.task_category}</td>
                     <td>{joinTypes(row.document_types)}</td>
                     <td>{dateRange(row.start_date, row.end_date)}</td>
@@ -653,11 +680,15 @@ function fallbackWorkItems(classifications: Classification[]): WorkItem[] {
   const grouped = new Map<string, WorkItem>();
   for (const row of classifications) {
     const key = row.work_id ?? row.work_title ?? row.task_category;
+    const term = termLabel(row.year, row.semester);
     const item = grouped.get(key) ?? {
       work_id: key,
       work_title: row.work_title ?? row.task_category,
       task_category: row.task_category,
       year: row.year,
+      years: [],
+      semesters: [],
+      terms: [],
       start_date: null,
       end_date: null,
       document_count: 0,
@@ -665,11 +696,25 @@ function fallbackWorkItems(classifications: Classification[]): WorkItem[] {
       documents: [],
     };
     item.document_count += 1;
+    if (row.year && !item.years?.includes(row.year)) item.years?.push(row.year);
+    if (row.semester && !item.semesters?.includes(row.semester)) item.semesters?.push(row.semester);
+    if (term && !item.terms?.includes(term)) item.terms?.push(term);
     if (!item.document_types.includes(row.document_type)) item.document_types.push(row.document_type);
-    item.documents.push({ document_id: row.document_id, document_type: row.document_type, label: row.label });
+    item.documents.push({
+      document_id: row.document_id,
+      document_type: row.document_type,
+      label: row.label,
+      year: row.year,
+      semester: row.semester,
+    });
     grouped.set(key, item);
   }
-  return Array.from(grouped.values());
+  return Array.from(grouped.values()).map((item) => ({
+    ...item,
+    years: [...(item.years ?? [])].sort(),
+    semesters: [...(item.semesters ?? [])].sort(),
+    terms: [...(item.terms ?? [])].sort(),
+  }));
 }
 
 function joinTypes(types: string[]): string {
@@ -690,41 +735,146 @@ function sourceSummary(draft: CalendarDraft): string {
 }
 
 function buildWorkflowNodes(workItems: WorkItem[]): WorkflowNode[] {
-  const ordered = [...workItems].sort((a, b) => {
-    const aDate = a.start_date ?? "9999-12-31";
-    const bDate = b.start_date ?? "9999-12-31";
-    return aDate.localeCompare(bDate) || a.work_title.localeCompare(b.work_title, "ko");
+  return buildWorkflowStageNodes(workItems);
+}
+
+function buildWorkflowStageNodes(workItems: WorkItem[]): WorkflowNode[] {
+  const groups = new Map<string, WorkflowStage>();
+
+  for (const item of workItems) {
+    for (const doc of item.documents ?? []) {
+      const stage = workflowStageForDocument(doc);
+      const key = stageWorkflowKey(stage.label);
+      const term = termLabel(doc.year ?? item.year, doc.semester) || termSummary(item);
+      const group = groups.get(key) ?? {
+        key,
+        label: stage.label,
+        order: stage.order,
+        workTitles: [],
+        taskCategories: [],
+        documentTypes: [],
+        documents: [],
+        terms: [],
+        startDate: doc.doc_date,
+        endDate: doc.doc_date,
+      };
+
+      if (!group.workTitles.includes(item.work_title)) group.workTitles.push(item.work_title);
+      if (!group.taskCategories.includes(item.task_category)) group.taskCategories.push(item.task_category);
+      if (!group.documentTypes.includes(doc.document_type)) group.documentTypes.push(doc.document_type);
+      if (term && !group.terms.includes(term)) group.terms.push(term);
+      if (doc.doc_date && (!group.startDate || doc.doc_date < group.startDate)) group.startDate = doc.doc_date;
+      if (doc.doc_date && (!group.endDate || doc.doc_date > group.endDate)) group.endDate = doc.doc_date;
+      group.documents.push({ ...doc, workTitle: item.work_title, taskCategory: item.task_category, term });
+      groups.set(key, group);
+    }
+  }
+
+  const stages = Array.from(groups.values()).sort((a, b) => {
+    const dateCompare = (a.startDate ?? "9999-12-31").localeCompare(b.startDate ?? "9999-12-31");
+    return a.order - b.order || dateCompare || a.label.localeCompare(b.label, "ko");
   });
 
-  return ordered.map((item, index) => {
-    const docs = item.documents ?? [];
-    const docTypes = uniqueStrings(item.document_types.length ? item.document_types : docs.map((doc) => doc.document_type));
+  if (stages.length === 0) return buildWorkItemFallbackNodes(workItems);
+
+  return stages.map((stage, index) => {
+    const docs = stage.documents.sort((a, b) => {
+      return (a.doc_date ?? "9999-12-31").localeCompare(b.doc_date ?? "9999-12-31")
+        || (a.doc_no ?? "").localeCompare(b.doc_no ?? "", "ko")
+        || (a.filename ?? a.label).localeCompare(b.filename ?? b.label, "ko");
+    });
     const filenames = uniqueStrings(docs.map((doc) => doc.filename ?? doc.label)).slice(0, 6);
     const collaborators = uniqueStrings(docs.map((doc) => departmentFromLabel(doc.label))).slice(0, 5);
-    const period = dateRange(item.start_date, item.end_date);
-    const procedures = docs.slice(0, 5).map((doc, docIndex) => {
-      const date = doc.doc_date ?? "날짜 미상";
-      const title = doc.filename ?? doc.label ?? `문서 ${docIndex + 1}`;
-      return `${date} · ${doc.document_type} · ${title}`;
-    });
 
     return {
-      id: item.work_id || `${item.work_title}-${index}`,
-      type: workflowTypeFor(item, index, ordered.length),
-      label: item.work_title || item.task_category || `업무 ${index + 1}`,
-      description: `${item.task_category || "미분류"} 업무로 묶인 ${item.document_count}개 문서의 처리 단계입니다.`,
-      period,
-      processingDays: workflowDuration(item.start_date, item.end_date),
-      procedures,
-      requiredDocs: docTypes.slice(0, 6),
+      id: `stage-${stage.key}`,
+      type: workflowTypeFor(stage, index, stages.length),
+      label: stage.label,
+      description: `${stage.workTitles.join(", ")} 업무의 ${stage.label} 단계입니다.`,
+      period: dateRange(stage.startDate, stage.endDate),
+      processingDays: workflowDuration(stage.startDate, stage.endDate),
+      procedures: docs.slice(0, 6).map((doc, docIndex) => {
+        const date = doc.doc_date ?? "날짜 미상";
+        const term = doc.term && doc.term !== "-" ? `${doc.term} · ` : "";
+        const title = doc.filename ?? doc.label ?? `문서 ${docIndex + 1}`;
+        return `${date} · ${term}${doc.document_type} · ${title}`;
+      }),
+      requiredDocs: uniqueStrings(stage.documentTypes).slice(0, 6),
       outputs: filenames,
       collaborators,
       notes: [
-        item.year ? `${item.year}년 기준` : "",
-        item.document_count > 1 ? `원문 ${item.document_count}개 병합` : "원문 1개",
-      ].filter(Boolean),
+        ...uniqueStrings(stage.terms).slice(0, 6),
+        docs.length > 1 ? `원문 ${docs.length}개 병합` : "원문 1개",
+      ],
     };
   });
+}
+
+function buildWorkItemFallbackNodes(workItems: WorkItem[]): WorkflowNode[] {
+  const ordered = [...workItems].sort((a, b) => {
+    return (a.start_date ?? "9999-12-31").localeCompare(b.start_date ?? "9999-12-31")
+      || a.work_title.localeCompare(b.work_title, "ko");
+  });
+
+  return ordered.map((item, index) => ({
+    id: item.work_id || `${item.work_title}-${index}`,
+    type: workflowTypeFor({
+      label: item.work_title,
+      documentTypes: item.document_types,
+      documents: item.documents.map((doc) => ({ ...doc, workTitle: item.work_title, taskCategory: item.task_category, term: termLabel(doc.year ?? item.year, doc.semester) || "" })),
+    }, index, ordered.length),
+    label: item.work_title || item.task_category || `업무 ${index + 1}`,
+    description: `${item.task_category || "미분류"} 업무로 묶인 ${item.document_count}개 문서입니다.`,
+    period: dateRange(item.start_date, item.end_date),
+    processingDays: workflowDuration(item.start_date, item.end_date),
+    procedures: [],
+    requiredDocs: item.document_types.slice(0, 6),
+    outputs: [],
+    collaborators: [],
+    notes: [termSummary(item), item.document_count > 1 ? `원문 ${item.document_count}개 병합` : "원문 1개"].filter(Boolean),
+  }));
+}
+
+function workflowStageForDocument(doc: WorkDocument): { label: string; order: number } {
+  const text = `${doc.document_type} ${doc.filename ?? ""} ${doc.label}`;
+  if (text.includes("지원 기준") || text.includes("변경")) return { label: "지원 기준 변경", order: 15 };
+  if (text.includes("시험")) return { label: "선발 시험", order: 20 };
+  if (text.includes("서류전형")) return { label: "서류전형", order: 30 };
+  if (text.includes("면접")) return { label: "면접전형", order: 40 };
+  if (text.includes("결과") || text.includes("합격자") || text.includes("후속") || text.includes("진행 계획")) {
+    return { label: "결과 보고", order: 50 };
+  }
+  if (text.includes("추가 모집") || text.includes("추가모집") || text.includes("모집")) {
+    return { label: "모집 공고", order: 10 };
+  }
+  if (text.includes("공고문") || text.includes("홈페이지") || text.includes("안내문")) {
+    return { label: "홈페이지 공고문", order: 60 };
+  }
+  if (doc.document_type && doc.document_type !== "문서") return { label: doc.document_type, order: 70 };
+  return { label: "기타 문서", order: 90 };
+}
+
+function stageWorkflowKey(label: string): string {
+  return label.replace(/[^0-9A-Za-z가-힣]+/g, "").toLowerCase();
+}
+
+function termSummary(item: WorkItem): string {
+  if (item.terms?.length) return item.terms.join(", ");
+  const years = item.years?.length ? item.years : item.year ? [item.year] : [];
+  const semesters = item.semesters ?? [];
+  if (years.length && semesters.length) {
+    return years.flatMap((year) => semesters.map((semester) => `${year}학년도 ${semester}학기`)).join(", ");
+  }
+  if (years.length) return years.map((year) => `${year}학년도`).join(", ");
+  if (semesters.length) return semesters.map((semester) => `${semester}학기`).join(", ");
+  return "-";
+}
+
+function termLabel(year?: number | null, semester?: number | null): string {
+  if (year && semester) return `${year}학년도 ${semester}학기`;
+  if (year) return `${year}학년도`;
+  if (semester) return `${semester}학기`;
+  return "";
 }
 
 function buildWorkflowColumns(nodes: WorkflowNode[]): WorkflowColumn[] {
@@ -747,13 +897,14 @@ function buildWorkflowColumns(nodes: WorkflowNode[]): WorkflowColumn[] {
   return columns;
 }
 
-function workflowTypeFor(item: WorkItem, index: number, total: number): WorkflowNodeType {
+function workflowTypeFor(stage: Pick<WorkflowStage, "label" | "documentTypes" | "documents">, index: number, total: number): WorkflowNodeType {
+  if (total === 1) return "step";
   if (index === 0) return "start";
   if (index === total - 1) return "end";
 
-  const text = `${item.work_title} ${item.task_category} ${item.document_types.join(" ")}`;
-  const decisionKeywords = ["심사", "평가", "검토", "면접", "시험", "선발", "결과", "승인", "변경"];
-  return decisionKeywords.some((keyword) => text.includes(keyword)) || item.document_count > 2 ? "decision" : "step";
+  const text = `${stage.label} ${stage.documentTypes.join(" ")}`;
+  const decisionKeywords = ["심사", "평가", "검토", "승인", "변경"];
+  return decisionKeywords.some((keyword) => text.includes(keyword)) ? "decision" : "step";
 }
 
 function workflowNodeType(type: WorkflowNodeType): string {
