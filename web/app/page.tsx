@@ -13,22 +13,29 @@ export default function Home() {
     getUserEmail().then((e) => { setEmail(e); setReady(true); });
   }, []);
 
-  if (!ready) return <Shell><p style={{ color: "#888" }}>로딩…</p></Shell>;
-  return <Shell>{email ? <Chat email={email} onLogout={() => setEmail(null)} /> : <Login onLogin={setEmail} />}</Shell>;
+  return (
+    <Shell>
+      {!ready ? <p className="muted">로딩…</p>
+        : email ? <Chat email={email} onLogout={() => setEmail(null)} />
+        : <Login onLogin={setEmail} />}
+    </Shell>
+  );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main style={{ maxWidth: 760, margin: "40px auto", padding: "0 16px" }}>
-      <nav style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
-        <strong>챗봇</strong>
-        <div style={{ display: "flex", gap: 14 }}>
-          <a href="/search" style={{ color: "#2357c6", textDecoration: "none", fontSize: 14 }}>문서 검색</a>
-          <a href="/admin" style={{ color: "#2357c6", textDecoration: "none", fontSize: 14 }}>관리자</a>
-        </div>
-      </nav>
-      <h1>KMU Wiki 챗봇</h1>
-      <p style={{ color: "#666" }}>전자결재 문서에서 검색해 답합니다. 권한 범위 내 문서만 조회됩니다.</p>
+    <main className="page">
+      <div className="topnav">
+        <span className="brand">KMU Wiki</span>
+        <nav>
+          <a className="navlink active" href="/">챗봇</a>
+          <a className="navlink" href="/search">문서 검색</a>
+          <a className="navlink" href="/admin">관리자</a>
+        </nav>
+      </div>
+      <span className="eyebrow">AI 문서 비서</span>
+      <h1>전자결재 문서에<br /><span className="gradient-text">바로 질문하세요.</span></h1>
+      <p className="lede">권한 범위 안의 문서만 검색해, 근거와 출처를 함께 답합니다.</p>
       {children}
     </main>
   );
@@ -54,14 +61,14 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 24, display: "grid", gap: 8, maxWidth: 320 }}>
-      <h3 style={{ margin: 0 }}>로그인</h3>
-      <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="이메일"
-        autoComplete="username" style={inp} />
-      <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호"
-        type="password" autoComplete="current-password" style={inp} />
-      <button disabled={busy} style={btn}>{busy ? "확인 중…" : "로그인"}</button>
-      {err && <p style={{ color: "#c00", fontSize: 13 }}>{err}</p>}
+    <form onSubmit={submit} className="glass" style={{ display: "grid", gap: 12, maxWidth: 380 }}>
+      <h2>로그인</h2>
+      <input className="input" value={email} onChange={(e) => setEmail(e.target.value)}
+        placeholder="이메일" autoComplete="username" />
+      <input className="input" value={pw} onChange={(e) => setPw(e.target.value)}
+        placeholder="비밀번호" type="password" autoComplete="current-password" />
+      <button className="btn btn-primary" disabled={busy}>{busy ? "확인 중…" : "로그인"}</button>
+      {err && <p className="error">{err}</p>}
     </form>
   );
 }
@@ -108,27 +115,30 @@ function Chat({ email, onLogout }: { email: string; onLogout: () => void }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-        <span style={{ fontSize: 13, color: "#666" }}>{email}</span>
-        <button onClick={logout} style={{ ...btn, padding: "4px 12px", fontSize: 13 }}>로그아웃</button>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <span className="pill">{email}</span>
+        <button className="btn btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={logout}>로그아웃</button>
       </div>
-      <form onSubmit={ask} style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <input value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="예) 교환학생 선발 일정 알려줘" style={{ ...inp, flex: 1 }} />
-        <button disabled={busy} style={btn}>{busy ? "검색 중…" : "질문"}</button>
+
+      <form onSubmit={ask} className="glass" style={{ display: "flex", gap: 10, padding: 16, alignItems: "center" }}>
+        <input className="input" value={query} onChange={(e) => setQuery(e.target.value)}
+          placeholder="예) 교환학생 면접전형은 언제 어떻게 진행되나요?" />
+        <button className="btn btn-primary" disabled={busy} style={{ whiteSpace: "nowrap" }}>
+          {busy ? "검색 중…" : "질문"}
+        </button>
       </form>
-      {answer && <section style={{ marginTop: 24, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{answer}</section>}
-      {citations.length > 0 && (
-        <aside style={{ marginTop: 24, borderTop: "1px solid #eee", paddingTop: 12 }}>
-          <h3 style={{ fontSize: 14, color: "#666" }}>출처</h3>
-          <ol style={{ fontSize: 14, color: "#444" }}>
-            {citations.map((c) => <li key={c.n}>{c.label}</li>)}
-          </ol>
-        </aside>
+
+      {(answer || citations.length > 0) && (
+        <div className="glass" style={{ marginTop: 18 }}>
+          {answer && <div className="answer">{answer}</div>}
+          {citations.length > 0 && (
+            <div className="sources">
+              <h3>출처</h3>
+              <ol>{citations.map((c) => <li key={c.n}>{c.label}</li>)}</ol>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
-
-const inp: React.CSSProperties = { padding: 10, fontSize: 16, border: "1px solid #ccc", borderRadius: 8 };
-const btn: React.CSSProperties = { padding: "10px 20px", fontSize: 16, borderRadius: 8, cursor: "pointer" };

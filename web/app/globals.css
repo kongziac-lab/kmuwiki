@@ -1,0 +1,155 @@
+/* KMU Wiki — Liquid Glass 디자인 시스템 (딥블루·퍼플 Apple 미감)
+   GPU 안전(transform/opacity), Pretendard, break-keep-all 한국어 타이포 */
+
+:root {
+  --bg-0: #070a1f;
+  --bg-1: #0d1438;
+  --indigo: #2a3ba8;
+  --violet: #5b3aa6;
+  --blue: #5b8bff;
+  --blue-bright: #7aa2ff;
+  --text: #eef2ff;
+  --muted: #9aa6d6;
+  --muted-dim: #6f7aa8;
+  --glass: rgba(255, 255, 255, 0.055);
+  --glass-strong: rgba(255, 255, 255, 0.09);
+  --hair: rgba(255, 255, 255, 0.12);
+  --hair-soft: rgba(255, 255, 255, 0.07);
+  --danger: #ff7a8a;
+  --ai-grad: linear-gradient(100deg, #ff8a4c, #ff5c9d 32%, #9a6bff 64%, #4aa3ff);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --radius: 22px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  color: var(--text);
+  font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 800px at 12% -10%, rgba(91, 139, 255, 0.28), transparent 60%),
+    radial-gradient(1000px 700px at 92% 8%, rgba(124, 92, 255, 0.24), transparent 58%),
+    radial-gradient(900px 900px at 50% 120%, rgba(42, 59, 168, 0.30), transparent 60%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1) 55%, #0a1030);
+  background-attachment: fixed;
+  word-break: keep-all;
+  line-height: 1.6;
+}
+
+/* 배경 위로 떠다니는 광원 오브 (layout의 .orb 요소) */
+.bg-orbs { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.orb { position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.5; will-change: transform; }
+.orb.a { width: 460px; height: 460px; top: -120px; left: -80px;
+  background: radial-gradient(circle, #2f6bff, transparent 70%); animation: float 13s var(--ease) infinite; }
+.orb.b { width: 520px; height: 520px; bottom: -160px; right: -120px;
+  background: radial-gradient(circle, #7a4cff, transparent 70%); animation: float 17s var(--ease) infinite reverse; }
+.orb.c { width: 360px; height: 360px; top: 38%; right: 24%;
+  background: radial-gradient(circle, #ff5c9d, transparent 70%); opacity: 0.22; animation: float 19s var(--ease) infinite; }
+
+@keyframes float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -34px, 0); } }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(18px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* 레이아웃 컨테이너 */
+.page { max-width: 880px; margin: 0 auto; padding: 28px 20px 80px; animation: fadeInUp 0.7s var(--ease) both; }
+
+/* 플로팅 글래스 내비 */
+.topnav {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 18px; margin-bottom: 30px;
+  background: var(--glass); border: 1px solid var(--hair); border-radius: 999px;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 30px -12px rgba(0, 0, 0, 0.5);
+}
+.topnav .brand { font-weight: 700; letter-spacing: -0.01em; }
+.topnav nav { display: flex; gap: 6px; }
+.navlink {
+  color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500;
+  padding: 7px 14px; border-radius: 999px; transition: all 0.4s var(--ease);
+}
+.navlink:hover { color: var(--text); background: var(--glass-strong); }
+.navlink.active { color: var(--text); background: var(--glass-strong); border: 1px solid var(--hair-soft); }
+
+/* 헤더 */
+.eyebrow {
+  display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--blue-bright);
+  background: rgba(91, 139, 255, 0.12); border: 1px solid rgba(91, 139, 255, 0.22);
+  padding: 5px 12px; border-radius: 999px; margin-bottom: 16px;
+}
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 12px;
+  font-weight: 800; }
+.gradient-text {
+  background: var(--ai-grad); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+}
+.lede { color: var(--muted); font-size: 16px; max-width: 60ch; margin: 0 0 28px; }
+h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 14px; }
+h3 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+
+/* 글래스 카드 (Double-Bezel) */
+.glass {
+  background: var(--glass); border: 1px solid var(--hair); border-radius: var(--radius);
+  backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px);
+  box-shadow: 0 24px 60px -28px rgba(4, 8, 30, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 26px;
+}
+.glass + .glass { margin-top: 18px; }
+
+/* 입력 */
+.input, input[type="text"], input[type="password"], input[type="email"], textarea, select {
+  width: 100%; padding: 13px 16px; font-size: 15px; color: var(--text);
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--hair);
+  border-radius: 14px; outline: none; transition: all 0.4s var(--ease);
+  font-family: inherit;
+}
+.input::placeholder, input::placeholder { color: var(--muted-dim); }
+.input:focus, input:focus, textarea:focus, select:focus {
+  border-color: rgba(122, 162, 255, 0.6); background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 4px rgba(91, 139, 255, 0.14);
+}
+
+/* 버튼 */
+.btn, button {
+  font-family: inherit; font-size: 15px; font-weight: 600; color: var(--text);
+  background: var(--glass-strong); border: 1px solid var(--hair);
+  padding: 12px 22px; border-radius: 999px; cursor: pointer;
+  transition: all 0.4s var(--ease);
+}
+.btn:hover, button:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+.btn:active, button:active { transform: scale(0.98); }
+.btn:disabled, button:disabled { opacity: 0.5; cursor: default; transform: none; }
+.btn-primary {
+  color: #0a0f2c; border: none;
+  background: linear-gradient(180deg, #aac4ff, var(--blue));
+  box-shadow: 0 10px 30px -10px rgba(91, 139, 255, 0.6);
+}
+.btn-primary:hover { box-shadow: 0 14px 36px -10px rgba(91, 139, 255, 0.7); background: linear-gradient(180deg, #bcd0ff, #6e9bff); }
+.btn-ghost { background: transparent; }
+
+/* 출처/리스트 */
+.sources { margin-top: 8px; border-top: 1px solid var(--hair-soft); padding-top: 16px; }
+.sources ol { margin: 0; padding-left: 20px; }
+.sources li { color: var(--muted); font-size: 14px; margin: 6px 0; line-height: 1.5; }
+
+.answer { white-space: pre-wrap; line-height: 1.75; font-size: 16px; color: var(--text); }
+.muted { color: var(--muted); }
+.error { color: var(--danger); font-size: 13.5px; margin-top: 6px; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  background: var(--glass-strong); border: 1px solid var(--hair-soft); color: var(--muted); }
+
+/* 테이블(관리자) */
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--hair-soft); }
+th { color: var(--muted); font-weight: 600; }
+
+a { color: var(--blue-bright); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .page { padding: 18px 14px 60px; }
+  .topnav { border-radius: 20px; }
+}
