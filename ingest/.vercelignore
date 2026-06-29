@@ -1,0 +1,10 @@
+# 비밀값·불필요 파일을 Vercel 업로드에서 제외 (특히 .env — service_role 키 보호)
+.env
+.env.*
+zips/
+tests/
+evaluation/
+__pycache__/
+*.pyc
+requirements-worker.txt
+requirements-api.txt

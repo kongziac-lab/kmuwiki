@@ -1,21 +1,6 @@
-# 코어 (DB 적재·문서 파싱)
+# 검색·RAG 서비스(Vercel) + 공유 코어 — 가벼운 런타임 의존성만.
+#   로컬 인제스트(문서 파서 포함)는 requirements-worker.txt 사용.
 supabase>=2.6
-python-dotenv>=1.0     # ingest/.env 자동 로드
-pdfplumber>=0.11
-python-docx>=1.1
-openpyxl>=3.1
-xlrd>=2.0             # 구형 .xls 파싱
-olefile>=0.47          # HWP 잠금 탐지 + PrvText 추출
-
-# 임베딩 (택1) — 기본은 fake(의존성 0).
-cohere>=5.0            # KMU_EMBED_PROVIDER=cohere (embed-multilingual-v3.0, 1024d)
-# FlagEmbedding>=1.2    # KMU_EMBED_PROVIDER=bge-m3 (로컬)
-
-# OCR (택1) — 1차 EasyOCR(CPU/Mac), 2차 PaddleOCR(GPU 서버)
-# easyocr>=1.7
-# paddleocr>=2.7
-# paddlepaddle-gpu      # GPU 서버
-
-# 마스킹 NER (§7.A L2 이름·주소). 운영 권장. 미설치 시 NER 비활성(정규식만).
-# transformers>=4.44
-# torch>=2.2
+python-dotenv>=1.0     # .env 자동 로드(로컬). Vercel은 프로젝트 env 사용
+cohere>=5.0            # 임베딩(embed-multilingual-v3.0) + chat(command-r)
+fastapi>=0.117         # 검색·RAG API (Vercel ASGI 자동 인식)
