@@ -65,3 +65,37 @@ def answer(query: str, sources: list[Source], client=None,
 def _default_client():
     import anthropic  # lazy
     return anthropic.Anthropic()
+
+
+def stream_answer(query: str, sources: list[Source], *, provider: str, model: str,
+                  anthropic_key: str | None = None, cohere_key: str | None = None):
+    """답변 토큰 스트리밍(제공자 무관). 출처 없으면 LLM 호출 없이 거절 1회.
+
+    provider: "anthropic"(Claude) | "cohere"(command-r). 둘 다 동일 RAG 프롬프트 사용.
+    """
+    if not sources:
+        yield REFUSAL
+        return
+    prompt = build_user_prompt(query, sources)
+
+    if provider == "anthropic":
+        import anthropic
+        client = anthropic.Anthropic(api_key=anthropic_key or None)
+        with client.messages.stream(
+            model=model, max_tokens=1024, system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            yield from stream.text_stream
+
+    elif provider == "cohere":
+        import cohere
+        client = cohere.ClientV2(cohere_key)
+        for ev in client.chat_stream(model=model, messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]):
+            if ev.type == "content-delta":
+                yield ev.delta.message.content.text
+
+    else:
+        raise ValueError(f"알 수 없는 LLM provider: {provider}")

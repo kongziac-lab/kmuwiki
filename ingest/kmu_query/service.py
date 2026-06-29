@@ -62,22 +62,15 @@ async def chat(req: Request, authorization: str | None = Header(default=None)):
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    provider, model = settings.resolve_llm()
+
     def gen():
         yield sse("citations", rag.citations(sources))
-        if not sources:
-            yield sse("token", rag.REFUSAL)
-            yield sse("done", {})
-            return
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
-        with client.messages.stream(
-            model=settings.llm_model, max_tokens=1024,
-            system=rag.SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": rag.build_user_prompt(query, sources)}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield sse("token", text)
+        for delta in rag.stream_answer(
+            query, sources, provider=provider, model=model,
+            anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
+        ):
+            yield sse("token", delta)
         yield sse("done", {})
 
     return StreamingResponse(gen(), media_type="text/event-stream")

@@ -52,10 +52,20 @@ class Settings:
     # SERVICE_ROLE_KEY 또는 새 secret 키(SUPABASE_SECRET_KEY) 둘 다 허용
     supabase_service_key: str = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
                                  or os.environ.get("SUPABASE_SECRET_KEY", ""))
-    # 검색/RAG 측(Phase 2): anon 키 + 사용자 JWT로 RLS 적용. LLM은 Claude.
+    # 검색/RAG 측(Phase 2): anon 키 + 사용자 JWT로 RLS 적용.
     supabase_anon_key: str = os.environ.get("SUPABASE_ANON_KEY", "")
+    # LLM(답변 생성). 제공자 미지정 시 키 보유로 자동(anthropic 우선, 없으면 cohere).
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    cohere_api_key: str = os.environ.get("COHERE_API_KEY", "")
+    llm_provider: str = os.environ.get("KMU_LLM_PROVIDER", "")  # "" = 자동
     llm_model: str = os.environ.get("KMU_LLM_MODEL", "claude-opus-4-8")
+    cohere_chat_model: str = os.environ.get("KMU_COHERE_CHAT_MODEL", "command-r-plus-08-2024")
+
+    def resolve_llm(self) -> tuple[str, str]:
+        """(provider, model). 명시 없으면 보유 키로 결정."""
+        provider = self.llm_provider or ("anthropic" if self.anthropic_api_key else "cohere")
+        model = self.llm_model if provider == "anthropic" else self.cohere_chat_model
+        return provider, model
 
     # 동작 모드
     dry_run: bool = os.environ.get("KMU_DRY_RUN", "0") == "1"  # DB 미적재, 콘솔 출력만
