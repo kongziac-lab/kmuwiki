@@ -20,7 +20,7 @@ from . import lockdetect
 from .chunking import chunk_text
 from .config import Settings
 from .hashing import sha256_bytes
-from .metadata import build_file_meta
+from .metadata import build_file_meta, resolve_file_fields
 from .models import DocStatus, FileMeta
 from .ocr import OCREngine
 from .parsers import extract_text
@@ -94,7 +94,9 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
                               error="텍스트 추출 실패(빈 본문)")
         return DocStatus.FAILED
 
-    meta.mime_type = pr.mime_type
+    # 파일별 시행번호 해석(붙임=상속, 그 외 PDF/문서=자기 번호 우선) — §7.B 개선
+    fields = resolve_file_fields(item.filename, item.data, text, item.zip_fields)
+    meta = build_file_meta(item.filename, item.path_in_zip, pr.mime_type, fields)
 
     # 5) 마스킹 (OCR 본문은 고위험)
     masked = deps.masker.mask(text)

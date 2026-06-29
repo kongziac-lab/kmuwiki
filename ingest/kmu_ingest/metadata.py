@@ -107,6 +107,44 @@ def extract_doc_fields(text: str | None) -> dict:
     return fields
 
 
+_ATTACH = re.compile(r"^\[?\s*붙임")
+
+
+def _is_attachment(filename: str) -> bool:
+    """'붙임 N.' / '[붙임 N]' 으로 시작하면 첨부 → 본문 기안문 번호를 상속."""
+    base = filename.replace("\\", "/").split("/")[-1]
+    return _ATTACH.match(base) is not None
+
+
+def resolve_file_fields(filename: str, data: bytes, text: str | None,
+                        zip_fields: dict | None) -> dict:
+    """파일별 시행번호 해석(§7.B 개선).
+
+    - 붙임(attachment): 본문 기안문 번호를 상속(zip_fields).
+    - 그 외 PDF: 자기 좌표 기반 시행번호가 있으면 그걸 사용(참조 문서가 호스트 번호를
+      잘못 상속받는 문제 해결).
+    - 그 외 비-PDF(mht/hwp 등): 추출 텍스트에 시행번호가 인라인으로 있으면 자기 번호 사용.
+    - 어느 것도 없으면 상속.
+    """
+    if _is_attachment(filename):
+        return zip_fields or {}
+
+    own: dict | None = None
+    if data and filename.lower().endswith(".pdf"):
+        try:
+            own = extract_pdf_fields(data)
+        except Exception:
+            own = None
+    if not (own and own.get("doc_no")) and text:
+        t = extract_doc_fields(text)
+        if t.get("doc_no"):
+            own = t
+
+    if own and own.get("doc_no"):
+        return own
+    return zip_fields or {}
+
+
 def build_file_meta(filename: str, path_in_zip: str, mime: str | None,
                     zip_fields: dict | None) -> FileMeta:
     """ZIP 단위 메타(zip_fields)를 파일 메타로 상속. security_level은 항상 None(미상=관리자 전용)."""

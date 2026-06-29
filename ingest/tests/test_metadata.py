@@ -1,7 +1,13 @@
 import unittest
 from datetime import date
 
-from kmu_ingest.metadata import _docno_from_words, build_file_meta, extract_doc_fields
+from kmu_ingest.metadata import (
+    _docno_from_words,
+    _is_attachment,
+    build_file_meta,
+    extract_doc_fields,
+    resolve_file_fields,
+)
 
 
 def _w(text, x0, top):
@@ -65,6 +71,31 @@ class TestDocnoFromWords(unittest.TestCase):
 
     def test_no_sihaeng(self):
         self.assertIsNone(_docno_from_words([_w("제목", 0, 0)]))
+
+
+class TestResolveFileFields(unittest.TestCase):
+    ZIP = {"dept": "국제교류팀", "doc_no": "국제교류팀-155", "doc_date": None}
+
+    def test_attachment_inherits(self):
+        # 붙임은 본문 번호 상속 (자기 텍스트에 시행번호 있어도 무시)
+        for name in ["붙임 1. 명단.xlsx", "[붙임 2] 평가표.hwp"]:
+            f = resolve_file_fields(name, b"", "시행 다른팀-999 ( 2026.1.1. )", self.ZIP)
+            self.assertEqual(f["doc_no"], "국제교류팀-155")
+
+    def test_reference_doc_uses_own_number(self):
+        # 붙임이 아니고 텍스트에 자기 시행번호가 있으면 그 번호 사용(상속 아님)
+        text = "제 목 선발 시험 실시\n시행 국제교류팀-123 ( 2026.03.18. )"
+        f = resolve_file_fields("선발 시험 실시.mht", b"", text, self.ZIP)
+        self.assertEqual(f["doc_no"], "국제교류팀-123")
+
+    def test_no_own_number_inherits(self):
+        f = resolve_file_fields("예산내역.html", b"", "그냥 표 데이터", self.ZIP)
+        self.assertEqual(f["doc_no"], "국제교류팀-155")
+
+    def test_is_attachment(self):
+        self.assertTrue(_is_attachment("붙임 1. x.hwp"))
+        self.assertTrue(_is_attachment("폴더/[붙임 2] y.pdf"))
+        self.assertFalse(_is_attachment("선발 시험 실시.pdf"))
 
 
 if __name__ == "__main__":
