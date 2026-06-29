@@ -3,11 +3,13 @@
 
 export const runtime = "nodejs";
 
-import { buildRagHeaders, resolveRagBase } from "@/lib/ragProxy";
+import { buildRagHeaders, rejectMissingAuthorization, resolveRagBase } from "@/lib/ragProxy";
 
 export async function POST(req: Request) {
   const body = await req.text();
   const auth = req.headers.get("authorization") ?? "";
+  const unauthorized = rejectMissingAuthorization(auth);
+  if (unauthorized) return unauthorized;
 
   const upstream = await fetch(`${resolveRagBase(req.url)}/hermes`, {
     method: "POST",

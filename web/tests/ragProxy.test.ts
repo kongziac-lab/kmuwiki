@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRagHeaders, resolveRagBase } from "../lib/ragProxy.ts";
+import { buildRagHeaders, rejectMissingAuthorization, resolveRagBase } from "../lib/ragProxy.ts";
 
 test("resolveRagBase maps the default relative RAG path onto the request origin", () => {
   assert.equal(
@@ -23,4 +23,13 @@ test("buildRagHeaders forwards auth and adds the server-side shared secret", () 
     authorization: "Bearer jwt",
     "x-kmuwiki-api-secret": "secret-value",
   });
+});
+
+test("rejectMissingAuthorization blocks public proxy abuse before RAG calls", async () => {
+  const missing = rejectMissingAuthorization("");
+  const present = rejectMissingAuthorization("Bearer jwt");
+
+  assert.equal(missing?.status, 401);
+  assert.equal(await missing?.text(), "missing authorization");
+  assert.equal(present, null);
 });

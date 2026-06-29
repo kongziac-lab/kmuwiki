@@ -24,3 +24,10 @@ export function buildRagHeaders(auth: string | null, apiSecret = process.env.KMU
   }
   return headers;
 }
+
+export function rejectMissingAuthorization(auth: string | null): Response | null {
+  if (!auth || !auth.toLowerCase().startsWith("bearer ")) {
+    return new Response("missing authorization", { status: 401 });
+  }
+  return null;
+}
