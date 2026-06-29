@@ -22,7 +22,10 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main style={{ maxWidth: 760, margin: "40px auto", padding: "0 16px" }}>
       <nav style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
         <strong>챗봇</strong>
-        <a href="/search" style={{ color: "#2357c6", textDecoration: "none", fontSize: 14 }}>문서 검색</a>
+        <div style={{ display: "flex", gap: 14 }}>
+          <a href="/search" style={{ color: "#2357c6", textDecoration: "none", fontSize: 14 }}>문서 검색</a>
+          <a href="/admin" style={{ color: "#2357c6", textDecoration: "none", fontSize: 14 }}>관리자</a>
+        </div>
       </nav>
       <h1>KMU Wiki 챗봇</h1>
       <p style={{ color: "#666" }}>전자결재 문서에서 검색해 답합니다. 권한 범위 내 문서만 조회됩니다.</p>

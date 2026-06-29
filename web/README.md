@@ -11,10 +11,12 @@
 ## 구성
 - `app/page.tsx` — 채팅 UI(클라이언트). 로그인 세션의 JWT를 실어 `/api/chat` 호출, SSE 렌더.
 - `app/search/page.tsx` — 키워드/하이브리드 검색 UI. 권한 범위 내 마스킹 청크와 출처 메타 표시.
+- `app/admin/page.tsx` — 관리자 대시보드. 문서 상태, 검토 큐, 로컬 인제스트 실행 상태 표시.
 - `app/api/chat/route.ts` — Python `/chat` 으로 스트리밍 프록시. 사용자 JWT 전달(RLS 적용), Python URL은 서버 전용.
 - `app/api/search/route.ts` — Python `/search` JSON 프록시. `/api/chat`과 같은 RLS/공유 시크릿 경로 사용.
 - `app/api/insights/route.ts` — Python `/insights` 프록시. 분류·흐름도·일정·보고서 초안.
 - `app/api/hermes/route.ts` — Python `/hermes` 프록시. 반복업무 탐지·안전한 문서 초안·변경 보고.
+- `app/api/admin/*` — 관리자 RPC 프록시와 localhost 전용 인제스트 실행 API.
 - `lib/ragProxy.ts` — Vercel Services(`/rag`)와 로컬 FastAPI(`PY_API_URL`) 경로 계산 및 공유 시크릿 헤더 구성.
 - `lib/supabase.ts` — 브라우저 Supabase 클라이언트(세션 토큰 획득).
 
@@ -33,4 +35,5 @@ npm install && npm run dev
 
 ## 구현 상태
 - 로그인 UI(Supabase Auth), 챗봇(`/`), 검색(`/search`) 구현.
+- 관리자 UI(`/admin`) 구현. 로컬 인제스트 실행은 localhost에서만 활성화된다.
 - 설치된 Next.js 기준 `npm test`와 `npm run build` 검증.

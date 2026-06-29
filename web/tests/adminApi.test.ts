@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  buildIngestCommand,
+  isLocalIngestAllowed,
+  resolveZipDir,
+} from "../lib/localIngest.ts";
+
+const root = path.resolve(process.cwd(), "..");
+const migrationPath = path.join(root, "supabase/migrations/0006_admin_dashboard_rpc.sql");
+
+test("admin dashboard migration defines required SECURITY DEFINER RPCs", () => {
+  assert.equal(existsSync(migrationPath), true);
+  const sql = readFileSync(migrationPath, "utf8");
+
+  for (const name of [
+    "current_user_is_admin",
+    "admin_dashboard_summary",
+    "admin_review_documents",
+    "admin_update_document_metadata",
+  ]) {
+    assert.match(sql, new RegExp(`create or replace function\\s+${name}\\b`, "i"));
+  }
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /auth\.uid\(\)/i);
+});
+
+test("local ingest is allowed only from local admin mode", () => {
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app" }), false);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "localhost:3000" }), true);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "127.0.0.1:3000", enableFlag: "1" }), true);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app", enableFlag: "1" }), false);
+});
+
+test("ingest command uses configured zip folder without shell interpolation", () => {
+  const zipDir = resolveZipDir({ KMU_ZIP_DIR: String.raw`\\NAS\KMU Wiki\2026` });
+  const command = buildIngestCommand(zipDir, { pythonBin: "python", ingestCwd: String.raw`C:\kmuwiki\ingest` });
+
+  assert.equal(command.command, "python");
+  assert.deepEqual(command.args, ["-m", "kmu_ingest.cli", "run", "--path", String.raw`\\NAS\KMU Wiki\2026`]);
+  assert.equal(command.cwd, String.raw`C:\kmuwiki\ingest`);
+});

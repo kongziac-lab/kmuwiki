@@ -31,6 +31,15 @@
 - 검색 API: `cd ingest && uvicorn kmu_query.service:app --port 8000`
 - 웹: `cd web && npm install && npm run dev`
 
+## 관리자 모드
+- `/admin`은 Supabase 로그인 후 `access_roles.role='admin'`인 사용자만 접근한다.
+- 운영 Vercel에서는 현황 조회와 검토 큐 관리만 가능하다.
+- 로컬 폴더 인제스트 실행은 `localhost` 관리자 모드에서만 가능하다.
+- ZIP 폴더는 `KMU_ZIP_DIR`로 지정한다. macOS 경로, Windows 드라이브, NAS UNC 경로 모두 환경변수로 교체 가능하다.
+  - macOS: `/Users/kdh/Documents/KMU-Wiki-Zips`
+  - Windows: `Z:\KMU-Wiki-Zips`
+  - NAS: `\\NAS\KMU-Wiki-Zips`
+
 ## 배포
 - **루트** → Vercel Services. `web/`은 Next.js 웹, `ingest/main.py`는 `/rag` FastAPI 검색·RAG 서비스.
 - **ingest/** 워커 → 학교 내부/로컬에서 실행. 원본 ZIP 파싱·마스킹·임베딩 적재는 Vercel에서 수행하지 않는다.

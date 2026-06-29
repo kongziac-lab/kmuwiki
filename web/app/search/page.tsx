@@ -35,6 +35,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <nav style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
         <a href="/" style={link}>챗봇</a>
         <strong>문서 검색</strong>
+        <a href="/admin" style={link}>관리자</a>
       </nav>
       <h1>KMU Wiki 문서 검색</h1>
       <p style={{ color: "#666" }}>전자결재 문서의 마스킹된 청크를 권한 범위 안에서 검색합니다.</p>

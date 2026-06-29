@@ -31,6 +31,18 @@ python -m kmu_ingest.cli run
 파일 폴더가 아니라 `documents.task_category`, `classification_confidence`,
 `review_required`, 임베딩 검색 결과로 수행한다.
 
+로컬 관리자 웹에서 실행할 때도 같은 `KMU_ZIP_DIR`을 사용한다. 다른 컴퓨터에서 Windows
+공유 드라이브나 NAS를 쓰는 경우 해당 컴퓨터의 환경변수만 바꾸면 된다.
+
+```bash
+# macOS
+KMU_ZIP_DIR=/Users/kdh/Documents/KMU-Wiki-Zips
+
+# Windows PowerShell 예시
+$env:KMU_ZIP_DIR="Z:\KMU-Wiki-Zips"
+$env:KMU_ZIP_DIR="\\NAS\KMU-Wiki-Zips"
+```
+
 ## 백필
 ```bash
 python -m kmu_ingest.cli backfill --dry-run
