@@ -8,7 +8,30 @@ type Classification = {
   task_category: string;
   document_type: string;
   year?: number | null;
+  work_id?: string;
+  work_title?: string;
   label: string;
+};
+
+type WorkDocument = {
+  document_id: string;
+  document_type: string;
+  label: string;
+  doc_no?: string | null;
+  doc_date?: string | null;
+  filename?: string | null;
+};
+
+type WorkItem = {
+  work_id: string;
+  work_title: string;
+  task_category: string;
+  year?: number | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  document_count: number;
+  document_types: string[];
+  documents: WorkDocument[];
 };
 
 type CalendarDraft = {
@@ -17,13 +40,25 @@ type CalendarDraft = {
   title: string;
   source_document_id: string;
   source_label: string;
+  source_document_ids?: string[];
+  source_labels?: string[];
+};
+
+type ReportWorkflow = {
+  source_format: string;
+  source_title: string;
+  steps: string[];
+  templates: { name: string; best_for: string }[];
+  markdown_preview: string;
 };
 
 type InsightsResponse = {
+  work_items: WorkItem[];
   classifications: Classification[];
   workflow_mermaid: string;
   calendar_drafts: CalendarDraft[];
   report_draft: string;
+  report_workflow: ReportWorkflow;
 };
 
 type RecurringWork = {
@@ -43,6 +78,9 @@ type UpdateReport = {
 type DocumentDraft = {
   status: string;
   title: string;
+  export_format?: string;
+  docx_filename?: string;
+  approval_form_plan?: string[];
   body: string;
   source_document_id: string;
   source_label: string;
@@ -208,18 +246,20 @@ function Workspace({ email, onLogout }: { email: string; onLogout: () => void })
 function ResultView({ result }: { result: CombinedResult }) {
   const timeline = useMemo(() => parseTimeline(result.insights.workflow_mermaid), [result.insights.workflow_mermaid]);
   const classifications = result.insights.classifications ?? [];
+  const workItems = result.insights.work_items ?? fallbackWorkItems(classifications);
   const calendarDrafts = result.insights.calendar_drafts ?? [];
   const recurring = result.hermes.recurring_work ?? [];
   const drafts = result.hermes.drafts ?? [];
   const newDocuments = result.hermes.update_report?.new_documents ?? [];
+  const workflow = result.insights.report_workflow;
 
   return (
     <div style={results}>
       <div style={summaryStrip}>
-        <Metric label="분류" value={classifications.length} />
+        <Metric label="업무" value={workItems.length} />
         <Metric label="일정 초안" value={calendarDrafts.length} />
         <Metric label="신규 문서" value={newDocuments.length} />
-        <Metric label={`${result.targetYear} 초안`} value={drafts.length} />
+        <Metric label={`${result.targetYear} DOCX`} value={drafts.length} />
       </div>
 
       <section className="glass" style={widePanel}>
@@ -243,24 +283,26 @@ function ResultView({ result }: { result: CombinedResult }) {
 
       <div style={twoColumn}>
         <section className="glass" style={panel}>
-          <PanelHeader title="업무 분류" meta={`${classifications.length}건`} />
+          <PanelHeader title="업무 분류" meta={`${workItems.length}개 업무 · ${classifications.length}개 문서`} />
           <div style={tableWrap}>
             <table>
               <thead>
                 <tr>
+                  <th>업무</th>
                   <th>분류</th>
                   <th>유형</th>
-                  <th>연도</th>
-                  <th>문서</th>
+                  <th>기간</th>
+                  <th>문서 수</th>
                 </tr>
               </thead>
               <tbody>
-                {classifications.map((row) => (
-                  <tr key={row.document_id}>
+                {workItems.map((row) => (
+                  <tr key={row.work_id}>
+                    <td>{row.work_title}</td>
                     <td>{row.task_category}</td>
-                    <td>{row.document_type}</td>
-                    <td>{row.year ?? "-"}</td>
-                    <td>{row.label}</td>
+                    <td>{joinTypes(row.document_types)}</td>
+                    <td>{dateRange(row.start_date, row.end_date)}</td>
+                    <td>{row.document_count}</td>
                   </tr>
                 ))}
               </tbody>
@@ -273,13 +315,13 @@ function ResultView({ result }: { result: CombinedResult }) {
           <div style={listStack}>
             {calendarDrafts.length === 0 && <Empty>일정 후보가 없습니다.</Empty>}
             {calendarDrafts.map((draft) => (
-              <article key={`${draft.date}-${draft.source_document_id}`} style={itemBox}>
+              <article key={`${draft.date}-${draft.title}`} style={itemBox}>
                 <div style={itemTop}>
                   <strong>{draft.date}</strong>
                   <span className="pill">{draft.status}</span>
                 </div>
                 <p style={itemTitle}>{draft.title}</p>
-                <p style={itemMeta}>{draft.source_label}</p>
+                <p style={itemMeta}>{sourceSummary(draft)}</p>
               </article>
             ))}
           </div>
@@ -304,16 +346,24 @@ function ResultView({ result }: { result: CombinedResult }) {
         </section>
 
         <section className="glass" style={panel}>
-          <PanelHeader title={`${result.targetYear} 문서 초안`} meta={`${drafts.length}건`} />
+          <PanelHeader title={`${result.targetYear} 문서 초안`} meta={`${drafts.length}개 DOCX`} />
           <div style={listStack}>
             {drafts.length === 0 && <Empty>차년도 초안 후보가 없습니다.</Empty>}
             {drafts.map((draft) => (
               <article key={`${draft.source_document_id}-${draft.title}`} style={itemBox}>
                 <div style={itemTop}>
-                  <strong>{draft.title}</strong>
-                  <span className="pill">{draft.status}</span>
+                  <strong>{draft.docx_filename ?? draft.title}</strong>
+                  <span className="pill">{draft.export_format ?? draft.status}</span>
                 </div>
                 <p style={itemMeta}>{draft.source_label}</p>
+                <button className="btn btn-ghost" style={downloadButton} onClick={() => downloadDocx(draft)}>
+                  DOCX 다운로드
+                </button>
+                {draft.approval_form_plan && (
+                  <ol style={stepList}>
+                    {draft.approval_form_plan.map((step) => <li key={step}>{step}</li>)}
+                  </ol>
+                )}
                 <pre style={draftBody}>{clip(draft.body, 900)}</pre>
               </article>
             ))}
@@ -325,6 +375,31 @@ function ResultView({ result }: { result: CombinedResult }) {
         <PanelHeader title="보고서 초안" meta="Markdown" />
         <pre style={reportBox}>{result.insights.report_draft}</pre>
       </section>
+
+      {workflow && (
+        <section className="glass" style={widePanel}>
+          <PanelHeader title="보고서 작성 플로우" meta={workflow.source_format.toUpperCase()} />
+          <div style={twoColumn}>
+            <div>
+              <h3>단계</h3>
+              <ol style={stepList}>
+                {workflow.steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+            </div>
+            <div>
+              <h3>양식</h3>
+              <div style={listStack}>
+                {workflow.templates.map((template) => (
+                  <article key={template.name} style={templateRow}>
+                    <strong>{template.name}</strong>
+                    <span style={itemMeta}>{template.best_for}</span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -384,6 +459,38 @@ async function postJson<T>(url: string, token: string, body: unknown): Promise<T
   return res.json() as Promise<T>;
 }
 
+async function downloadDocx(draft: DocumentDraft): Promise<void> {
+  const token = await getAccessToken();
+  if (!token) {
+    window.alert("로그인 세션이 없습니다.");
+    return;
+  }
+  const res = await fetch("/api/hermes/docx", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      title: draft.title,
+      docx_filename: draft.docx_filename,
+      body: draft.body,
+      source_label: draft.source_label,
+      approval_form_plan: draft.approval_form_plan,
+    }),
+  });
+  if (!res.ok) {
+    window.alert(`DOCX 생성 실패 (${res.status})`);
+    return;
+  }
+  const blob = await res.blob();
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = draft.docx_filename ?? "draft.docx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
+
 function parseTimeline(workflow_mermaid: string): TimelineItem[] {
   return workflow_mermaid
     .split("\n")
@@ -405,6 +512,46 @@ function shortId(id: string): string {
   return id.length > 10 ? id.slice(0, 10) : id;
 }
 
+function fallbackWorkItems(classifications: Classification[]): WorkItem[] {
+  const grouped = new Map<string, WorkItem>();
+  for (const row of classifications) {
+    const key = row.work_id ?? row.work_title ?? row.task_category;
+    const item = grouped.get(key) ?? {
+      work_id: key,
+      work_title: row.work_title ?? row.task_category,
+      task_category: row.task_category,
+      year: row.year,
+      start_date: null,
+      end_date: null,
+      document_count: 0,
+      document_types: [],
+      documents: [],
+    };
+    item.document_count += 1;
+    if (!item.document_types.includes(row.document_type)) item.document_types.push(row.document_type);
+    item.documents.push({ document_id: row.document_id, document_type: row.document_type, label: row.label });
+    grouped.set(key, item);
+  }
+  return Array.from(grouped.values());
+}
+
+function joinTypes(types: string[]): string {
+  return types.length ? types.join(", ") : "-";
+}
+
+function dateRange(start?: string | null, end?: string | null): string {
+  if (!start && !end) return "-";
+  if (!end || start === end) return start ?? end ?? "-";
+  return `${start} ~ ${end}`;
+}
+
+function sourceSummary(draft: CalendarDraft): string {
+  const labels = draft.source_labels ?? [draft.source_label].filter(Boolean);
+  const count = draft.source_document_ids?.length ?? labels.length;
+  const label = labels[0] ?? draft.source_label;
+  return count > 1 ? `${label} 외 ${count - 1}개 원문 병합` : label;
+}
+
 const accountRow: CSSProperties = {
   display: "flex",
   justifyContent: "flex-end",
@@ -415,6 +562,12 @@ const accountRow: CSSProperties = {
 
 const compactButton: CSSProperties = {
   padding: "6px 14px",
+  fontSize: 13,
+};
+
+const downloadButton: CSSProperties = {
+  marginTop: 10,
+  padding: "6px 12px",
   fontSize: 13,
 };
 
@@ -529,6 +682,14 @@ const listStack: CSSProperties = {
   gap: 10,
 };
 
+const stepList: CSSProperties = {
+  margin: "8px 0 0",
+  paddingLeft: 22,
+  color: "var(--muted)",
+  fontSize: 14,
+  lineHeight: 1.7,
+};
+
 const itemBox: CSSProperties = {
   border: "1px solid var(--hair-soft)",
   borderRadius: 14,
@@ -611,4 +772,11 @@ const draftBody: CSSProperties = {
   marginTop: 10,
   fontSize: 13,
   maxHeight: 220,
+};
+
+const templateRow: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  borderTop: "1px solid var(--hair-soft)",
+  paddingTop: 10,
 };

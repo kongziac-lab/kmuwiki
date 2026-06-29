@@ -1,6 +1,11 @@
 import unittest
 
-from kmu_query.hermes import detect_recurring_work, draft_next_year_document, update_report
+from kmu_query.hermes import (
+    detect_recurring_work,
+    draft_next_year_document,
+    draft_next_year_documents,
+    update_report,
+)
 from kmu_query.retriever import Source
 
 
@@ -30,6 +35,23 @@ class TestHermes(unittest.TestCase):
         self.assertIn("2027학년도", draft["body"])
         self.assertIn("{전화번호}", draft["body"])
         self.assertNotIn("010-3333-4444", draft["body"])
+        self.assertEqual(draft["export_format"], "docx")
+        self.assertTrue(draft["docx_filename"].endswith(".docx"))
+        self.assertIn("전자결재", draft["approval_form_plan"][0])
+
+    def test_next_year_drafts_deduplicate_equivalent_source_files(self):
+        duplicate_sources = recurring_sources() + [
+            Source("d2026-mht", 0, "2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 실시", 0.8,
+                   filename="2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.mht",
+                   doc_no="국제교류팀-1843", doc_date="2026-02-27", dept="국제교류팀"),
+        ]
+
+        drafts = draft_next_year_documents(duplicate_sources, target_year=2027, limit=5)
+
+        self.assertEqual(len(drafts), 1)
+        self.assertEqual([draft["docx_filename"] for draft in drafts].count(
+            "2027년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.docx"
+        ), 1)
 
     def test_update_report_lists_changed_documents(self):
         report = update_report("교환학생 선발", recurring_sources(), known_document_ids={"d2025"})

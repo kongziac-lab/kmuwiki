@@ -4,3 +4,4 @@ supabase>=2.6
 python-dotenv>=1.0     # .env 자동 로드(로컬). Vercel은 프로젝트 env 사용
 cohere>=5.0            # 임베딩(embed-multilingual-v3.0) + chat(command-r)
 fastapi>=0.117         # 검색·RAG API (Vercel ASGI 자동 인식)
+python-docx>=1.1       # Hermes DOCX 초안 생성

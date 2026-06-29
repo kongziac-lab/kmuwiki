@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import hmac
 import json
+from urllib.parse import quote
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from kmu_ingest.config import load_settings
 from kmu_ingest.embedding import make_embedder
@@ -22,6 +23,7 @@ from kmu_ingest.embedding import make_embedder
 from . import rag
 from . import insights
 from . import hermes
+from . import docx_export
 from .retriever import Retriever
 from .audit import log_access
 
@@ -121,11 +123,14 @@ async def build_insights(
     sources = retriever.retrieve(
         query, int(body.get("k", 12)), body.get("dept"))
     log_access(client, action="insights", query=query, sources=sources)
+    report_draft = insights.draft_report(query, sources)
     return JSONResponse({
+        "work_items": insights.group_work_items(sources),
         "classifications": [insights.classify_source(s) for s in sources],
         "workflow_mermaid": insights.build_mermaid_timeline(sources),
         "calendar_drafts": insights.build_calendar_drafts(sources),
-        "report_draft": insights.draft_report(query, sources),
+        "report_draft": report_draft,
+        "report_workflow": insights.build_report_workflow(query, report_draft),
     })
 
 
@@ -146,9 +151,34 @@ async def hermes_report(
     log_access(client, action="hermes", query=query, sources=sources)
     drafts = []
     if isinstance(target_year, int):
-        drafts = [hermes.draft_next_year_document(source, target_year) for source in sources[:3]]
+        drafts = hermes.draft_next_year_documents(sources, target_year, limit=3)
     return JSONResponse({
         "update_report": hermes.update_report(query, sources, known_document_ids=known),
         "recurring_work": hermes.detect_recurring_work(sources),
         "drafts": drafts,
     })
+
+
+@app.post("/hermes/docx")
+async def hermes_docx(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing authorization")
+    body = await req.json()
+    filename = docx_export.safe_docx_filename(body.get("docx_filename") or body.get("title") or "draft")
+    data = docx_export.build_approval_docx(
+        title=filename,
+        body=body.get("body") or "",
+        source_label=body.get("source_label") or "",
+        approval_form_plan=body.get("approval_form_plan") or [],
+    )
+    quoted = quote(filename)
+    return Response(
+        data,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
+    )

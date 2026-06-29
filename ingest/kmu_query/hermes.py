@@ -46,13 +46,40 @@ def draft_next_year_document(source: Source, target_year: int) -> dict:
     if current_year is not None:
         title = title.replace(str(current_year), str(target_year))
         body = body.replace(str(current_year), str(target_year))
+    docx_filename = _docx_filename(title)
     return {
         "status": "draft",
-        "title": _sanitize_pii(title),
+        "title": _sanitize_pii(docx_filename),
+        "export_format": "docx",
+        "docx_filename": _sanitize_pii(docx_filename),
+        "approval_form_plan": [
+            "전자결재 PDF의 기본 결재문 영역(제목, 시행부서, 시행일, 본문, 붙임)을 DOCX 섹션으로 재구성",
+            "원문 결재선/담당자/전화/이메일은 마스킹 자리표시자를 유지",
+            "본문은 원문 줄바꿈과 붙임 목록을 우선 보존하고, 누락 필드는 검토 필요 표시",
+        ],
         "body": _sanitize_pii(body),
         "source_document_id": source.document_id,
         "source_label": source.label(),
     }
+
+
+def draft_next_year_documents(sources: list[Source], target_year: int, limit: int = 3) -> list[dict]:
+    drafts: list[dict] = []
+    seen_templates: set[str] = set()
+    ordered = sorted(
+        sources,
+        key=lambda source: (_year(source) or 0, source.doc_date or "", source.score),
+        reverse=True,
+    )
+    for source in ordered:
+        key = _template_title(source.filename or source.label())
+        if key in seen_templates:
+            continue
+        seen_templates.add(key)
+        drafts.append(draft_next_year_document(source, target_year))
+        if len(drafts) >= limit:
+            break
+    return drafts
 
 
 def update_report(query: str, sources: list[Source], known_document_ids: set[str] | None = None) -> dict:
@@ -72,6 +99,11 @@ def _template_title(title: str) -> str:
     title = _TITLE_YEAR_RE.sub(r"{year}\1", title)
     title = _YEAR_RE.sub("{year}", title)
     return re.sub(r"\s+", " ", title).strip()
+
+
+def _docx_filename(title: str) -> str:
+    base = re.sub(r"\.[^.]+$", "", title).strip()
+    return f"{base}.docx"
 
 
 def _year(source: Source) -> int | None:

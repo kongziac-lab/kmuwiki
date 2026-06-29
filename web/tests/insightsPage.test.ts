@@ -13,11 +13,22 @@ test("insights page wires Phase 4 and Phase 5 APIs into the web UI", () => {
   const source = readFileSync(pageUrl, "utf8");
   assert.match(source, /\/api\/insights/);
   assert.match(source, /\/api\/hermes/);
+  assert.match(source, /\/api\/hermes\/docx/);
   assert.match(source, /workflow_mermaid/);
+  assert.match(source, /work_items/);
   assert.match(source, /calendar_drafts/);
   assert.match(source, /report_draft/);
+  assert.match(source, /report_workflow/);
   assert.match(source, /recurring_work/);
   assert.match(source, /drafts/);
+  assert.match(source, /docx_filename/);
+});
+
+test("docx export proxy keeps the same authenticated RAG boundary", () => {
+  const source = readWebFile("app/api/hermes/docx/route.ts");
+  assert.match(source, /rejectMissingAuthorization/);
+  assert.match(source, /buildRagHeaders/);
+  assert.match(source, /\/hermes\/docx/);
 });
 
 test("primary navigation exposes the insights workspace", () => {
