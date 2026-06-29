@@ -60,6 +60,8 @@ class Settings:
     llm_provider: str = os.environ.get("KMU_LLM_PROVIDER", "")  # "" = 자동
     llm_model: str = os.environ.get("KMU_LLM_MODEL", "claude-opus-4-8")
     cohere_chat_model: str = os.environ.get("KMU_COHERE_CHAT_MODEL", "command-r-plus-08-2024")
+    # 웹 프록시 ↔ Python API 사이의 공유 시크릿. 설정된 경우 /search, /chat은 이 헤더가 필요하다.
+    api_shared_secret: str = os.environ.get("KMU_API_SHARED_SECRET", "")
 
     def resolve_llm(self) -> tuple[str, str]:
         """(provider, model). 명시 없으면 보유 키로 결정."""

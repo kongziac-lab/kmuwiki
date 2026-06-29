@@ -1,7 +1,9 @@
 import unittest
+from types import SimpleNamespace
 
 from kmu_query import rag
 from kmu_query.retriever import Retriever, Source
+from kmu_query.service import require_api_secret
 
 
 # ── 가짜 Supabase 클라이언트/응답 ────────────────────────────────
@@ -75,6 +77,26 @@ class TestRagAssembly(unittest.TestCase):
         self.assertEqual([c["n"] for c in cites], [1, 2])
         self.assertEqual(cites[0]["doc_no"], "제2025-13호")
 
+    def test_context_and_citations_group_multiple_chunks_from_same_document(self):
+        sources = [
+            Source("d1", 0, "1절. 면접 일시는 3월 23일이다.", 0.9,
+                   filename="면접.pdf", doc_no="국제교류팀-155", dept="국제교류팀"),
+            Source("d1", 1, "2절. 장소는 동영관이다.", 0.8,
+                   filename="면접.pdf", doc_no="국제교류팀-155", dept="국제교류팀"),
+            Source("d2", 0, "추가 모집은 별도 공지한다.", 0.7,
+                   filename="모집.pdf", doc_no="국제교류팀-124", dept="국제교류팀"),
+        ]
+
+        ctx = rag.build_context(sources)
+        cites = rag.citations(sources)
+
+        self.assertIn("1절. 면접 일시는", ctx)
+        self.assertIn("2절. 장소는", ctx)
+        self.assertNotIn("[3]", ctx)
+        self.assertEqual([c["n"] for c in cites], [1, 2])
+        self.assertEqual(cites[0]["document_id"], "d1")
+        self.assertEqual(cites[1]["document_id"], "d2")
+
 
 class TestRagAnswer(unittest.TestCase):
     def test_no_sources_refuses_without_llm(self):
@@ -107,6 +129,25 @@ class TestRagAnswer(unittest.TestCase):
         # 시스템 프롬프트와 컨텍스트가 전달됐는지
         self.assertIn("자료", captured["messages"][0]["content"])
         self.assertEqual(captured["system"], rag.SYSTEM_PROMPT)
+
+
+class TestApiSecretGate(unittest.TestCase):
+    def test_missing_secret_configuration_allows_local_development(self):
+        settings = SimpleNamespace(api_shared_secret="")
+        require_api_secret(None, settings)
+
+    def test_matching_secret_is_required_when_configured(self):
+        settings = SimpleNamespace(api_shared_secret="secret-value")
+
+        with self.assertRaises(Exception) as missing:
+            require_api_secret(None, settings)
+        self.assertEqual(getattr(missing.exception, "status_code", None), 401)
+
+        with self.assertRaises(Exception) as wrong:
+            require_api_secret("wrong", settings)
+        self.assertEqual(getattr(wrong.exception, "status_code", None), 401)
+
+        require_api_secret("secret-value", settings)
 
 
 if __name__ == "__main__":

@@ -21,10 +21,32 @@ SYSTEM_PROMPT = (
 )
 
 
+def _group_sources(sources: list[Source]) -> list[Source]:
+    """같은 문서의 여러 청크를 하나의 인용 번호로 합친다."""
+    grouped: dict[str, Source] = {}
+    for s in sources:
+        existing = grouped.get(s.document_id)
+        content = s.content.strip()
+        if existing is None:
+            grouped[s.document_id] = Source(
+                document_id=s.document_id,
+                chunk_index=s.chunk_index,
+                content=content,
+                score=s.score,
+                filename=s.filename,
+                doc_no=s.doc_no,
+                doc_date=s.doc_date,
+                dept=s.dept,
+            )
+        elif content and content not in existing.content:
+            existing.content = f"{existing.content}\n\n{content}".strip()
+    return list(grouped.values())
+
+
 def build_context(sources: list[Source]) -> str:
     """검색 결과를 번호 매긴 컨텍스트 블록으로."""
     blocks = []
-    for i, s in enumerate(sources, start=1):
+    for i, s in enumerate(_group_sources(sources), start=1):
         blocks.append(f"[{i}] ({s.label()})\n{s.content.strip()}")
     return "\n\n".join(blocks)
 
@@ -42,7 +64,7 @@ def citations(sources: list[Source]) -> list[dict]:
         "filename": s.filename,
         "doc_no": s.doc_no,
         "doc_date": s.doc_date,
-    } for i, s in enumerate(sources, start=1)]
+    } for i, s in enumerate(_group_sources(sources), start=1)]
 
 
 def answer(query: str, sources: list[Source], client=None,

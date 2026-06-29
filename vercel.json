@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "experimentalServices": {
+    "web": {
+      "entrypoint": "web",
+      "routePrefix": "/"
+    },
+    "rag": {
+      "entrypoint": "ingest/main.py",
+      "routePrefix": "/rag"
+    }
+  }
+}

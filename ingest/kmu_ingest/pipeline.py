@@ -18,10 +18,11 @@ from dataclasses import dataclass, field
 
 from . import lockdetect
 from .chunking import chunk_text
+from .cleaning import strip_boilerplate
 from .config import Settings
 from .hashing import sha256_bytes
 from .metadata import build_file_meta, resolve_file_fields
-from .models import DocStatus, FileMeta
+from .models import DocStatus
 from .ocr import OCREngine
 from .parsers import extract_text
 from .pii.egress_gate import EgressBlocked, assert_clean
@@ -46,13 +47,6 @@ class Deps:
     masker: Masker
     ocr: OCREngine
     embedder: object
-
-
-def _meta_prefix(meta: FileMeta) -> str | None:
-    bits = [b for b in (meta.dept, meta.doc_no,
-                        meta.doc_date.isoformat() if meta.doc_date else None) if b]
-    return f"[{' '.join(bits)}]" if bits else None
-
 
 def process(item: WorkItem, deps: Deps) -> DocStatus:
     store = deps.store
@@ -110,9 +104,10 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
                               status=DocStatus.QUARANTINE.value, error=str(e))
         return DocStatus.QUARANTINE
 
-    # 7) 청킹 → 임베딩 → 적재 (마스킹된 본문만)
-    chunks = chunk_text(masked.text, deps.settings.chunk_chars,
-                        deps.settings.chunk_overlap, prefix=_meta_prefix(meta))
+    # 7) 검색용 본문 정리 → 청킹 → 임베딩 → 적재 (마스킹된 본문만)
+    searchable_text = strip_boilerplate(masked.text)
+    chunks = chunk_text(searchable_text, deps.settings.chunk_chars,
+                        deps.settings.chunk_overlap)
     if not chunks:
         store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                               status=DocStatus.FAILED.value, error="청크 0개")

@@ -2,6 +2,7 @@ import unittest
 
 from kmu_ingest.config import EMBED_DIM, Settings
 from kmu_ingest.embedding import make_embedder
+from kmu_ingest.models import Chunk
 from kmu_ingest.models import DocStatus
 from kmu_ingest.ocr import OCREngine
 from kmu_ingest.pii.masker import MaskResult, Masker
@@ -25,6 +26,35 @@ def item(filename, data, zip_enc=False, path=None):
     return WorkItem(zip_sha256="ziphash", zip_id="zid",
                     path_in_zip=path or filename, filename=filename,
                     data=data, zip_entry_encrypted=zip_enc)
+
+
+class CapturingStore:
+    def __init__(self):
+        self.chunks: list[Chunk] = []
+        self._docs: dict[str, str] = {}
+
+    def document_status(self, sha256):
+        return self._docs.get(sha256)
+
+    def upsert_document(self, *, sha256, zip_id, meta, status,
+                        is_encrypted=False, error=None):
+        self._docs[sha256] = status
+        return f"doc-{sha256[:8]}"
+
+    def insert_chunks(self, document_id, chunks, embeddings, model, version):
+        self.chunks = chunks
+
+
+class CapturingEmbedder:
+    model = "fake"
+    version = "v1"
+
+    def __init__(self):
+        self.texts: list[str] = []
+
+    def embed(self, texts):
+        self.texts = list(texts)
+        return [[0.1] * EMBED_DIM for _ in texts]
 
 
 class TestPipeline(unittest.TestCase):
@@ -85,6 +115,36 @@ class TestPipeline(unittest.TestCase):
         deps = make_deps()  # ocr backend none
         st = process(item("scan.png", b"\x89PNG\r\n\x1a\n fake"), deps)
         self.assertEqual(st, DocStatus.PENDING_OCR)
+
+    def test_boilerplate_and_meta_prefix_are_excluded_from_embedding_text(self):
+        store = CapturingStore()
+        embedder = CapturingEmbedder()
+        deps = Deps(
+            settings=Settings(dry_run=True, embed_provider="fake"),
+            store=store,
+            masker=Masker(enable_ner=False),
+            ocr=OCREngine("none"),
+            embedder=embedder,
+        )
+        text = """진리와 정의와 사랑의 나라를 위하여
+수신자 내부결재
+(경 유)
+제 목 교환학생 면접전형 실시
+
+면접전형은 2026년 3월 23일 동영관에서 진행한다.
+시행 국제교류팀-155 ( 2026. 3. 1. )
+협조자 국제교류팀장
+"""
+
+        st = process(item("기안문.txt", text.encode()), deps)
+
+        self.assertEqual(st, DocStatus.PROCESSED)
+        embedded = "\n".join(embedder.texts)
+        self.assertIn("면접전형은 2026년 3월 23일", embedded)
+        self.assertNotIn("진리와 정의와 사랑", embedded)
+        self.assertNotIn("수신자 내부결재", embedded)
+        self.assertNotIn("시행 국제교류팀-155", embedded)
+        self.assertTrue(all(not c.content.startswith("[") for c in store.chunks))
 
 
 if __name__ == "__main__":
