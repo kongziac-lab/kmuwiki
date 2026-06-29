@@ -104,6 +104,11 @@ async def chat(
         for delta in rag.stream_answer(
             query, sources, provider=provider, model=model,
             anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
+            nous_key=settings.nous_api_key, nous_base_url=settings.nous_base_url,
+            gemini_key=settings.gemini_api_key,
+            gemini_use_vertex=settings.gemini_use_vertex,
+            gemini_project=settings.gemini_project,
+            gemini_location=settings.gemini_location,
         ):
             yield sse("token", delta)
         yield sse("done", {})

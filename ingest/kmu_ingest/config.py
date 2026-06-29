@@ -57,6 +57,19 @@ class Settings:
     # LLM(답변 생성). 제공자 미지정 시 키 보유로 자동(anthropic 우선, 없으면 cohere).
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     cohere_api_key: str = os.environ.get("COHERE_API_KEY", "")
+    # Nous Portal(OpenAI 호환 aggregator). 답변 생성 전용. 임베딩은 항상 Cohere(1024d) 유지.
+    nous_api_key: str = os.environ.get("NOUS_API_KEY", "")
+    nous_base_url: str = os.environ.get("KMU_NOUS_BASE_URL", "https://inference-api.nousresearch.com/v1")
+    nous_model: str = os.environ.get("KMU_NOUS_MODEL", "Hermes-4-70B")
+    # Google Gemini 직접 연결(google-genai). 답변 생성 전용. 임베딩은 항상 Cohere(1024d) 유지.
+    gemini_api_key: str = (os.environ.get("GEMINI_API_KEY")
+                           or os.environ.get("GOOGLE_API_KEY", ""))
+    gemini_model: str = os.environ.get("KMU_GEMINI_MODEL", "gemini-2.5-pro")
+    gemini_use_vertex: bool = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "0").lower() in ("1", "true", "yes")
+    gemini_project: str = (os.environ.get("GOOGLE_CLOUD_PROJECT")
+                           or os.environ.get("GOOGLE_GENAI_PROJECT", ""))
+    gemini_location: str = (os.environ.get("GOOGLE_CLOUD_LOCATION")
+                            or os.environ.get("GOOGLE_GENAI_LOCATION", "asia-northeast3"))
     llm_provider: str = os.environ.get("KMU_LLM_PROVIDER", "")  # "" = 자동
     llm_model: str = os.environ.get("KMU_LLM_MODEL", "claude-opus-4-8")
     cohere_chat_model: str = os.environ.get("KMU_COHERE_CHAT_MODEL", "command-r-plus-08-2024")
@@ -64,9 +77,14 @@ class Settings:
     api_shared_secret: str = os.environ.get("KMU_API_SHARED_SECRET", "")
 
     def resolve_llm(self) -> tuple[str, str]:
-        """(provider, model). 명시 없으면 보유 키로 결정."""
+        """(provider, model). 명시(KMU_LLM_PROVIDER) 우선. 자동은 anthropic 키 있으면 anthropic, 없으면 cohere.
+        nous/gemini는 silent-switch 방지를 위해 KMU_LLM_PROVIDER 로 명시했을 때만 켜진다."""
         provider = self.llm_provider or ("anthropic" if self.anthropic_api_key else "cohere")
-        model = self.llm_model if provider == "anthropic" else self.cohere_chat_model
+        model = {
+            "anthropic": self.llm_model,
+            "nous": self.nous_model,
+            "gemini": self.gemini_model,
+        }.get(provider, self.cohere_chat_model)
         return provider, model
 
     # 동작 모드

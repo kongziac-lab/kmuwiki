@@ -58,6 +58,36 @@ python -m unittest discover -s tests -v
 python -m kmu_verify.phase6 --out ../phase6-report.json
 ```
 
+## RAG 답변 모델
+임베딩은 계속 Cohere multilingual 1024차원 계열을 사용하고, 아래 설정은 답변 생성 LLM에만 적용한다.
+마스킹된 검색 출처만 provider로 전송된다.
+
+```bash
+# 기본: ANTHROPIC_API_KEY가 있으면 Claude, 없으면 Cohere chat
+KMU_LLM_PROVIDER=
+
+# Cohere 명시
+KMU_LLM_PROVIDER=cohere
+KMU_COHERE_CHAT_MODEL=command-r-plus-08-2024
+
+# Nous Portal(OpenAI 호환 aggregator) — 모델 탐색/A-B 테스트용
+KMU_LLM_PROVIDER=nous
+NOUS_API_KEY=...
+KMU_NOUS_MODEL=Hermes-4-70B
+
+# Google Gemini 직접 연결 — Gemini 운영 확정 시 권장
+KMU_LLM_PROVIDER=gemini
+GOOGLE_API_KEY=...
+KMU_GEMINI_MODEL=gemini-2.5-pro
+
+# Vertex AI를 쓰면 프로젝트와 리전을 지정한다. 기본 리전은 서울.
+GOOGLE_GENAI_USE_VERTEXAI=1
+GOOGLE_CLOUD_PROJECT=your-project
+GOOGLE_CLOUD_LOCATION=asia-northeast3
+```
+
+`nous`와 `gemini`는 silent switch 방지를 위해 `KMU_LLM_PROVIDER`로 명시했을 때만 켜진다.
+
 ## 단계별 상태(state machine)
 `pending_password`(잠김) · `pending_ocr`(스캔본, OCR 대기) · `quarantine`(PII 잔존 차단) ·
 `processed` · `failed`. 2차(로컬 GPU 서버) 백필은 `pending_password`/`pending_ocr` 만 골라 처리.

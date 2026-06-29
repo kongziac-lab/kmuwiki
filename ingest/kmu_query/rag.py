@@ -90,10 +90,15 @@ def _default_client():
 
 
 def stream_answer(query: str, sources: list[Source], *, provider: str, model: str,
-                  anthropic_key: str | None = None, cohere_key: str | None = None):
+                  anthropic_key: str | None = None, cohere_key: str | None = None,
+                  nous_key: str | None = None, nous_base_url: str | None = None,
+                  gemini_key: str | None = None, gemini_use_vertex: bool = False,
+                  gemini_project: str | None = None, gemini_location: str | None = None):
     """답변 토큰 스트리밍(제공자 무관). 출처 없으면 LLM 호출 없이 거절 1회.
 
-    provider: "anthropic"(Claude) | "cohere"(command-r). 둘 다 동일 RAG 프롬프트 사용.
+    provider: "anthropic"(Claude) | "cohere"(command-r) | "nous"(OpenAI 호환 aggregator)
+              | "gemini"(Google 직접).
+    모두 동일 RAG 프롬프트(마스킹된 출처만)를 쓴다.
     """
     if not sources:
         yield REFUSAL
@@ -118,6 +123,53 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         ]):
             if ev.type == "content-delta":
                 yield ev.delta.message.content.text
+
+    elif provider == "nous":
+        from openai import OpenAI  # Nous Portal은 OpenAI 호환
+        client = OpenAI(api_key=nous_key or None,
+                        base_url=nous_base_url or "https://inference-api.nousresearch.com/v1")
+        stream = client.chat.completions.create(
+            model=model, max_tokens=1024, stream=True,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                      {"role": "user", "content": prompt}],
+        )
+        for chunk in stream:
+            choices = getattr(chunk, "choices", None) or []
+            delta = choices[0].delta.content if choices else None
+            if delta:
+                yield delta
+
+    elif provider == "gemini":
+        from google import genai
+        from google.genai import types
+
+        client_kwargs = {}
+        if gemini_use_vertex:
+            client_kwargs = {
+                "vertexai": True,
+                "project": gemini_project or None,
+                "location": gemini_location or "asia-northeast3",
+            }
+        else:
+            client_kwargs = {"api_key": gemini_key or None}
+        client = genai.Client(**{k: v for k, v in client_kwargs.items() if v is not None})
+        try:
+            stream = client.models.generate_content_stream(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    max_output_tokens=1024,
+                ),
+            )
+            for chunk in stream:
+                text = getattr(chunk, "text", None)
+                if text:
+                    yield text
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
 
     else:
         raise ValueError(f"알 수 없는 LLM provider: {provider}")
