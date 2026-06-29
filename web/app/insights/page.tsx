@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type Classification = {
@@ -116,27 +117,17 @@ export default function InsightsPage() {
     });
   }, []);
 
-  if (!ready) return <Shell><p className="muted">로딩...</p></Shell>;
-  return <Shell>{email ? <Workspace email={email} onLogout={() => setEmail(null)} /> : <Login onLogin={setEmail} />}</Shell>;
-}
-
-function Shell({ children }: { children: ReactNode }) {
   return (
-    <main className="page" style={{ maxWidth: 1120 }}>
-      <div className="topnav">
-        <span className="brand">KMU Wiki</span>
-        <nav>
-          <a className="navlink" href="/">챗봇</a>
-          <a className="navlink" href="/search">문서 검색</a>
-          <a className="navlink active" href="/insights">업무 활용</a>
-          <a className="navlink" href="/admin">관리자</a>
-        </nav>
-      </div>
-      <span className="eyebrow">업무 활용</span>
-      <h1>문서 묶음에서 <span className="gradient-text">업무 흐름과 초안</span> 만들기</h1>
-      <p className="lede">권한 범위 안의 문서를 기반으로 분류, 일정, 보고서, 반복업무 초안을 생성합니다.</p>
-      {children}
-    </main>
+    <AppShell
+      active="insights"
+      eyebrow="업무 활용"
+      title={<>문서 묶음에서 <span className="gradient-text">업무 흐름과 초안</span> 만들기</>}
+      lede="권한 범위 안의 문서를 기반으로 분류, 일정, 보고서, 반복업무 초안을 생성합니다."
+    >
+      {!ready ? <p className="muted">로딩...</p>
+        : email ? <Workspace email={email} onLogout={() => setEmail(null)} />
+        : <Login onLogin={setEmail} />}
+    </AppShell>
   );
 }
 
@@ -219,19 +210,19 @@ function Workspace({ email, onLogout }: { email: string; onLogout: () => void })
         <button className="btn btn-ghost" style={compactButton} onClick={logout}>로그아웃</button>
       </div>
 
-      <form onSubmit={submit} className="glass" style={queryPanel}>
-        <div style={queryGrid}>
-          <label style={fieldLabel}>
+      <form onSubmit={submit} className="glass query-form">
+        <div className="query-grid">
+          <label className="query-field">
             업무
             <input className="input" value={query} onChange={(e) => setQuery(e.target.value)}
               placeholder="예) 2026 파견교환학생" />
           </label>
-          <label style={yearField}>
+          <label className="query-field">
             대상 연도
             <input className="input" value={targetYear} onChange={(e) => setTargetYear(e.target.value)}
               inputMode="numeric" placeholder="2027" />
           </label>
-          <button className="btn btn-primary" disabled={busy} style={{ alignSelf: "end", whiteSpace: "nowrap" }}>
+          <button className="query-submit btn btn-primary" disabled={busy}>
             {busy ? "생성 중..." : "생성"}
           </button>
         </div>
@@ -569,30 +560,6 @@ const downloadButton: CSSProperties = {
   marginTop: 10,
   padding: "6px 12px",
   fontSize: 13,
-};
-
-const queryPanel: CSSProperties = {
-  padding: 16,
-};
-
-const queryGrid: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-  alignItems: "end",
-};
-
-const fieldLabel: CSSProperties = {
-  display: "grid",
-  gap: 6,
-  color: "var(--muted)",
-  fontSize: 13,
-  fontWeight: 600,
-};
-
-const yearField: CSSProperties = {
-  ...fieldLabel,
-  minWidth: 0,
 };
 
 const results: CSSProperties = {

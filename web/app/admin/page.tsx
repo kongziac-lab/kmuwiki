@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type Summary = {
@@ -57,23 +58,14 @@ export default function AdminPage() {
 
 function Frame({ children }: { children: React.ReactNode }) {
   return (
-    <main style={page}>
-      <nav style={nav}>
-        <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
-          <strong>관리자</strong>
-          <a href="/" style={link}>챗봇</a>
-          <a href="/search" style={link}>문서 검색</a>
-          <a href="/insights" style={link}>업무 활용</a>
-        </div>
-      </nav>
-      <header style={header}>
-        <div>
-          <h1 style={title}>KMU Wiki 운영 대시보드</h1>
-          <p style={muted}>문서 적재 상태, 검토 큐, 로컬 인제스트 실행을 관리합니다.</p>
-        </div>
-      </header>
+    <AppShell
+      active="admin"
+      eyebrow="관리자"
+      title="KMU Wiki 운영 대시보드"
+      lede="문서 적재 상태, 검토 큐, 로컬 인제스트 실행을 관리합니다."
+    >
       {children}
-    </main>
+    </AppShell>
   );
 }
 
@@ -323,13 +315,7 @@ function Td({ children, colSpan }: { children: React.ReactNode; colSpan?: number
 const GLASS = "rgba(255,255,255,0.055)";
 const HAIR = "1px solid rgba(255,255,255,0.12)";
 const HAIR_SOFT = "1px solid rgba(255,255,255,0.07)";
-const page: React.CSSProperties = { maxWidth: 1120, margin: "0 auto", padding: "28px 20px 80px", color: "#eef2ff" };
-const nav: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 18px", background: GLASS, border: HAIR, borderRadius: 999, backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)" };
-const link: React.CSSProperties = { color: "#7aa2ff", textDecoration: "none", fontSize: 14, fontWeight: 500 };
-const header: React.CSSProperties = { margin: "28px 0 18px" };
-const title: React.CSSProperties = { margin: 0, fontSize: 36, letterSpacing: "-0.02em", fontWeight: 800 };
 const muted: React.CSSProperties = { color: "#9aa6d6", margin: "8px 0 0" };
-const input: React.CSSProperties = { padding: "13px 16px", fontSize: 15, color: "#eef2ff", background: "rgba(255,255,255,0.04)", border: HAIR, borderRadius: 14 };
 const button: React.CSSProperties = { padding: "12px 22px", fontSize: 15, fontWeight: 600, color: "#0a0f2c", background: "linear-gradient(180deg,#aac4ff,#5b8bff)", border: "none", borderRadius: 999, cursor: "pointer" };
 const smallButton: React.CSSProperties = { padding: "7px 14px", fontSize: 13, color: "#eef2ff", background: "rgba(255,255,255,0.09)", border: HAIR, borderRadius: 999, cursor: "pointer" };
 const accountRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 };

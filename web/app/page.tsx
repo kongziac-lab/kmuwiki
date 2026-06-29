@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type Citation = { n: number; label: string };
@@ -14,31 +15,16 @@ export default function Home() {
   }, []);
 
   return (
-    <Shell>
+    <AppShell
+      active="chat"
+      eyebrow="AI 문서 비서"
+      title={<>전자결재 문서에<br /><span className="gradient-text">바로 질문하세요.</span></>}
+      lede="권한 범위 안의 문서만 검색해, 근거와 출처를 함께 답합니다."
+    >
       {!ready ? <p className="muted">로딩…</p>
         : email ? <Chat email={email} onLogout={() => setEmail(null)} />
         : <Login onLogin={setEmail} />}
-    </Shell>
-  );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <main className="page">
-      <div className="topnav">
-        <span className="brand">KMU Wiki</span>
-        <nav>
-          <a className="navlink active" href="/">챗봇</a>
-          <a className="navlink" href="/search">문서 검색</a>
-          <a className="navlink" href="/insights">업무 활용</a>
-          <a className="navlink" href="/admin">관리자</a>
-        </nav>
-      </div>
-      <span className="eyebrow">AI 문서 비서</span>
-      <h1>전자결재 문서에<br /><span className="gradient-text">바로 질문하세요.</span></h1>
-      <p className="lede">권한 범위 안의 문서만 검색해, 근거와 출처를 함께 답합니다.</p>
-      {children}
-    </main>
+    </AppShell>
   );
 }
 
@@ -121,12 +107,17 @@ function Chat({ email, onLogout }: { email: string; onLogout: () => void }) {
         <button className="btn btn-ghost" style={{ padding: "6px 14px", fontSize: 13 }} onClick={logout}>로그아웃</button>
       </div>
 
-      <form onSubmit={ask} className="glass" style={{ display: "flex", gap: 10, padding: 16, alignItems: "center" }}>
-        <input className="input" value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="예) 교환학생 면접전형은 언제 어떻게 진행되나요?" />
-        <button className="btn btn-primary" disabled={busy} style={{ whiteSpace: "nowrap" }}>
-          {busy ? "검색 중…" : "질문"}
-        </button>
+      <form onSubmit={ask} className="glass query-form">
+        <div className="query-grid">
+          <label className="query-field">
+            <span className="sr-only">질문</span>
+            <input className="input" value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="예) 교환학생 면접전형은 언제 어떻게 진행되나요?" />
+          </label>
+          <button className="query-submit btn btn-primary" disabled={busy}>
+            {busy ? "검색 중…" : "질문"}
+          </button>
+        </div>
       </form>
 
       {(answer || citations.length > 0) && (

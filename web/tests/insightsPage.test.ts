@@ -32,7 +32,5 @@ test("docx export proxy keeps the same authenticated RAG boundary", () => {
 });
 
 test("primary navigation exposes the insights workspace", () => {
-  for (const path of ["app/page.tsx", "app/search/page.tsx", "app/admin/page.tsx"]) {
-    assert.match(readWebFile(path), /href="\/insights"/, `${path} should link to /insights`);
-  }
+  assert.match(readWebFile("components/AppShell.tsx"), /href: "\/insights"/);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type SearchSource = {
@@ -25,27 +26,17 @@ export default function SearchPage() {
     });
   }, []);
 
-  if (!ready) return <Shell><p style={{ color: "#9aa6d6" }}>로딩...</p></Shell>;
-  return <Shell>{email ? <Search email={email} onLogout={() => setEmail(null)} /> : <Login onLogin={setEmail} />}</Shell>;
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="page" style={{ maxWidth: 920 }}>
-      <div className="topnav">
-        <span className="brand">KMU Wiki</span>
-        <nav>
-          <a className="navlink" href="/">챗봇</a>
-          <a className="navlink active" href="/search">문서 검색</a>
-          <a className="navlink" href="/insights">업무 활용</a>
-          <a className="navlink" href="/admin">관리자</a>
-        </nav>
-      </div>
-      <span className="eyebrow">문서 검색</span>
-      <h1>마스킹된 청크를 <span className="gradient-text">권한 범위 안에서</span> 검색</h1>
-      <p className="lede">전자결재 문서의 마스킹된 청크를 권한 범위 안에서 검색합니다.</p>
-      {children}
-    </main>
+    <AppShell
+      active="search"
+      eyebrow="문서 검색"
+      title={<>마스킹된 청크를 <span className="gradient-text">권한 범위 안에서</span> 검색</>}
+      lede="전자결재 문서의 마스킹된 청크를 권한 범위 안에서 검색합니다."
+    >
+      {!ready ? <p className="muted">로딩...</p>
+        : email ? <Search email={email} onLogout={() => setEmail(null)} />
+        : <Login onLogin={setEmail} />}
+    </AppShell>
   );
 }
 
@@ -126,12 +117,17 @@ function Search({ email, onLogout }: { email: string; onLogout: () => void }) {
     <section>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
         <span style={{ fontSize: 13, color: "#9aa6d6" }}>{email}</span>
-        <button onClick={logout} style={{ ...btn, padding: "4px 12px", fontSize: 13 }}>로그아웃</button>
+        <button className="btn btn-ghost" onClick={logout} style={{ padding: "6px 14px", fontSize: 13 }}>로그아웃</button>
       </div>
-      <form onSubmit={submit} style={{ display: "flex", gap: 8, marginTop: 16 }}>
-        <input value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="예) 면접전형 일정" style={{ ...inp, flex: 1 }} />
-        <button disabled={busy} style={btn}>{busy ? "검색 중..." : "검색"}</button>
+      <form onSubmit={submit} className="glass query-form" style={{ marginTop: 16 }}>
+        <div className="query-grid">
+          <label className="query-field">
+            <span className="sr-only">검색어</span>
+            <input className="input" value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="예) 면접전형 일정" />
+          </label>
+          <button className="query-submit btn btn-primary" disabled={busy}>{busy ? "검색 중..." : "검색"}</button>
+        </div>
       </form>
       {err && <p style={{ color: "#ff7a8a", fontSize: 13 }}>{err}</p>}
       {resultCount > 0 && <p style={{ color: "#9aa6d6", fontSize: 13, marginTop: 16 }}>{resultCount}개 결과</p>}
@@ -164,9 +160,6 @@ function excerpt(content: string): string {
   return text.length > 220 ? `${text.slice(0, 220)}...` : text;
 }
 
-const link: React.CSSProperties = { color: "#7aa2ff", textDecoration: "none", fontSize: 14, fontWeight: 500 };
-const inp: React.CSSProperties = { padding: "13px 16px", fontSize: 15, color: "#eef2ff", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14 };
-const btn: React.CSSProperties = { padding: "12px 22px", fontSize: 15, fontWeight: 600, color: "#0a0f2c", background: "linear-gradient(180deg,#aac4ff,#5b8bff)", border: "none", borderRadius: 999, cursor: "pointer" };
 const resultBox: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.12)",
   borderRadius: 18,
