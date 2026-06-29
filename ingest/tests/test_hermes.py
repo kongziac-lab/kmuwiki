@@ -35,8 +35,8 @@ class TestHermes(unittest.TestCase):
         self.assertIn("2027학년도", draft["body"])
         self.assertIn("{전화번호}", draft["body"])
         self.assertNotIn("010-3333-4444", draft["body"])
-        self.assertEqual(draft["export_format"], "docx")
-        self.assertTrue(draft["docx_filename"].endswith(".docx"))
+        self.assertEqual(draft["export_format"], "hwpx")
+        self.assertTrue(draft["hwpx_filename"].endswith(".hwpx"))
         self.assertIn("전자결재", draft["approval_form_plan"][0])
 
     def test_next_year_drafts_deduplicate_equivalent_source_files(self):
@@ -49,8 +49,8 @@ class TestHermes(unittest.TestCase):
         drafts = draft_next_year_documents(duplicate_sources, target_year=2027, limit=5)
 
         self.assertEqual(len(drafts), 1)
-        self.assertEqual([draft["docx_filename"] for draft in drafts].count(
-            "2027년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.docx"
+        self.assertEqual([draft["hwpx_filename"] for draft in drafts].count(
+            "2027년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.hwpx"
         ), 1)
 
     def test_update_report_lists_changed_documents(self):

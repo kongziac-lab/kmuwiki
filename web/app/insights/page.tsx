@@ -80,6 +80,7 @@ type DocumentDraft = {
   status: string;
   title: string;
   export_format?: string;
+  hwpx_filename?: string;
   docx_filename?: string;
   approval_form_plan?: string[];
   body: string;
@@ -250,7 +251,7 @@ function ResultView({ result }: { result: CombinedResult }) {
         <Metric label="업무" value={workItems.length} />
         <Metric label="일정 초안" value={calendarDrafts.length} />
         <Metric label="신규 문서" value={newDocuments.length} />
-        <Metric label={`${result.targetYear} DOCX`} value={drafts.length} />
+        <Metric label={`${result.targetYear} HWPX`} value={drafts.length} />
       </div>
 
       <section className="glass" style={widePanel}>
@@ -337,18 +338,18 @@ function ResultView({ result }: { result: CombinedResult }) {
         </section>
 
         <section className="glass" style={panel}>
-          <PanelHeader title={`${result.targetYear} 문서 초안`} meta={`${drafts.length}개 DOCX`} />
+          <PanelHeader title={`${result.targetYear} 문서 초안`} meta={`${drafts.length}개 HWPX`} />
           <div style={listStack}>
             {drafts.length === 0 && <Empty>차년도 초안 후보가 없습니다.</Empty>}
             {drafts.map((draft) => (
               <article key={`${draft.source_document_id}-${draft.title}`} style={itemBox}>
                 <div style={itemTop}>
-                  <strong>{draft.docx_filename ?? draft.title}</strong>
+                  <strong>{draft.hwpx_filename ?? draft.title}</strong>
                   <span className="pill">{draft.export_format ?? draft.status}</span>
                 </div>
                 <p style={itemMeta}>{draft.source_label}</p>
-                <button className="btn btn-ghost" style={downloadButton} onClick={() => downloadDocx(draft)}>
-                  DOCX 다운로드
+                <button className="btn btn-ghost" style={downloadButton} onClick={() => downloadHwpx(draft)}>
+                  HWPX 다운로드
                 </button>
                 {draft.approval_form_plan && (
                   <ol style={stepList}>
@@ -450,36 +451,42 @@ async function postJson<T>(url: string, token: string, body: unknown): Promise<T
   return res.json() as Promise<T>;
 }
 
-async function downloadDocx(draft: DocumentDraft): Promise<void> {
+async function downloadHwpx(draft: DocumentDraft): Promise<void> {
   const token = await getAccessToken();
   if (!token) {
     window.alert("로그인 세션이 없습니다.");
     return;
   }
-  const res = await fetch("/api/hermes/docx", {
+  const filename = hwpxDownloadName(draft);
+  const res = await fetch("/api/hermes/hwpx", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({
       title: draft.title,
-      docx_filename: draft.docx_filename,
+      hwpx_filename: filename,
       body: draft.body,
       source_label: draft.source_label,
       approval_form_plan: draft.approval_form_plan,
     }),
   });
   if (!res.ok) {
-    window.alert(`DOCX 생성 실패 (${res.status})`);
+    window.alert(`HWPX 생성 실패 (${res.status})`);
     return;
   }
   const blob = await res.blob();
   const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = href;
-  link.download = draft.docx_filename ?? "draft.docx";
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(href);
+}
+
+function hwpxDownloadName(draft: DocumentDraft): string {
+  const base = draft.hwpx_filename ?? draft.docx_filename ?? draft.title ?? "draft";
+  return `${base.replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]+/g, "").trim() || "draft"}.hwpx`;
 }
 
 function parseTimeline(workflow_mermaid: string): TimelineItem[] {

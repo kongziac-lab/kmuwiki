@@ -24,6 +24,7 @@ from . import rag
 from . import insights
 from . import hermes
 from . import docx_export
+from . import hwpx_export
 from .retriever import Retriever
 from .audit import log_access
 
@@ -180,5 +181,32 @@ async def hermes_docx(
     return Response(
         data,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
+    )
+
+
+@app.post("/hermes/hwpx")
+async def hermes_hwpx(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing authorization")
+    body = await req.json()
+    filename = hwpx_export.safe_hwpx_filename(
+        body.get("hwpx_filename") or body.get("docx_filename") or body.get("title") or "draft"
+    )
+    data = hwpx_export.build_approval_hwpx(
+        title=filename,
+        body=body.get("body") or "",
+        source_label=body.get("source_label") or "",
+        approval_form_plan=body.get("approval_form_plan") or [],
+    )
+    quoted = quote(filename)
+    return Response(
+        data,
+        media_type=hwpx_export.HWPX_MIME,
         headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
     )
