@@ -31,8 +31,10 @@ python -m kmu_ingest.cli run
 파일 폴더가 아니라 `documents.task_category`, `classification_confidence`,
 `review_required`, 임베딩 검색 결과로 수행한다.
 
-로컬 관리자 웹에서 실행할 때도 같은 `KMU_ZIP_DIR`을 사용한다. 다른 컴퓨터에서 Windows
-공유 드라이브나 NAS를 쓰는 경우 해당 컴퓨터의 환경변수만 바꾸면 된다.
+로컬 관리자 웹에서 실행할 때도 기본값은 같은 `KMU_ZIP_DIR`을 사용한다. 관리자 화면의
+`로컬 ZIP 폴더` 입력칸에서 실행할 폴더를 매번 절대경로로 바꿀 수도 있다. 다른 컴퓨터에서
+Windows 공유 드라이브나 NAS를 쓰는 경우 해당 컴퓨터의 환경변수를 기본값으로 두거나,
+웹 입력칸에 해당 경로를 넣어 실행한다.
 
 ```bash
 # macOS

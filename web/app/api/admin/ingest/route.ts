@@ -3,14 +3,29 @@ export const runtime = "nodejs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { bearerToken, errorResponse, requireAdmin } from "@/lib/adminAuth";
+import { ApiError, bearerToken, errorResponse, requireAdmin } from "@/lib/adminAuth";
 import { buildIngestCommand, isLocalIngestAllowed, resolveZipDir } from "@/lib/localIngest";
 
 const execFileAsync = promisify(execFile);
 
-function ingestStatus(req: Request) {
+type IngestBody = {
+  zipDir?: unknown;
+};
+
+async function readIngestBody(req: Request): Promise<IngestBody> {
+  const text = await req.text();
+  if (!text.trim()) return {};
+  try {
+    const body = JSON.parse(text) as IngestBody;
+    return body && typeof body === "object" ? body : {};
+  } catch {
+    throw new ApiError(400, "invalid ingest request body");
+  }
+}
+
+function ingestStatus(req: Request, requestedZipDir?: unknown) {
   const url = new URL(req.url);
-  const zipDir = resolveZipDir();
+  const zipDir = resolveZipDir(process.env, requestedZipDir);
   const allowed = isLocalIngestAllowed({
     nodeEnv: process.env.NODE_ENV,
     requestHost: url.host,
@@ -36,7 +51,13 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await requireAdmin(bearerToken(req));
-    const status = ingestStatus(req);
+    const body = await readIngestBody(req);
+    let status: ReturnType<typeof ingestStatus>;
+    try {
+      status = ingestStatus(req, body.zipDir);
+    } catch (error) {
+      throw new ApiError(400, error instanceof Error ? error.message : "invalid ZIP folder");
+    }
     if (!status.allowed) {
       return new Response("local ingest is only available from localhost", { status: 409 });
     }

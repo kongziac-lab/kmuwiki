@@ -11,7 +11,29 @@ export type IngestCommand = {
 
 export type LocalIngestEnv = Record<string, string | undefined>;
 
-export function resolveZipDir(env: LocalIngestEnv = process.env): string {
+export function isSupportedLocalFolderPath(input: string): boolean {
+  const value = input.trim();
+  if (!value || value.includes("\0")) return false;
+  if (path.isAbsolute(value)) return true;
+  if (/^[A-Za-z]:[\\/]/.test(value)) return true;
+  return /^\\\\[^\\]+\\[^\\]+/.test(value);
+}
+
+export function normalizeRequestedZipDir(input: unknown): string {
+  if (typeof input !== "string") {
+    throw new Error("ZIP 폴더는 문자열 절대경로로 입력해주세요.");
+  }
+  const value = input.trim();
+  if (!isSupportedLocalFolderPath(value)) {
+    throw new Error("ZIP 폴더는 로컬/NAS 절대경로로 입력해주세요.");
+  }
+  return value;
+}
+
+export function resolveZipDir(env: LocalIngestEnv = process.env, requestedZipDir?: unknown): string {
+  if (requestedZipDir !== undefined && requestedZipDir !== null) {
+    return normalizeRequestedZipDir(requestedZipDir);
+  }
   return env.KMU_ZIP_DIR?.trim() || DEFAULT_ZIP_DIR;
 }
 

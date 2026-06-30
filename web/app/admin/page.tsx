@@ -106,6 +106,7 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
   const [summary, setSummary] = useState<Summary | null>(null);
   const [reviewDocs, setReviewDocs] = useState<ReviewDocument[]>([]);
   const [ingest, setIngest] = useState<LocalIngestStatus | null>(null);
+  const [zipDirInput, setZipDirInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [ingestBusy, setIngestBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -142,7 +143,11 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
       setSummary(await summaryRes.json());
       const reviewBody = await reviewRes.json();
       setReviewDocs(Array.isArray(reviewBody.documents) ? reviewBody.documents : []);
-      setIngest(ingestRes.ok ? await ingestRes.json() : null);
+      const ingestBody = ingestRes.ok ? await ingestRes.json() as LocalIngestStatus : null;
+      setIngest(ingestBody);
+      if (ingestBody?.zipDir) {
+        setZipDirInput((value) => value.trim() ? value : ingestBody.zipDir);
+      }
     } catch (error: unknown) {
       setErr(error instanceof Error ? error.message : "대시보드 조회 실패");
     } finally {
@@ -164,7 +169,10 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
     setMessage("");
     setErr("");
     try {
-      const res = await authFetch("/api/admin/ingest", { method: "POST" });
+      const res = await authFetch("/api/admin/ingest", {
+        method: "POST",
+        body: JSON.stringify({ zipDir: zipDirInput.trim() }),
+      });
       const text = await res.text();
       if (!res.ok) throw new Error(text || `ingest ${res.status}`);
       const body = JSON.parse(text);
@@ -220,12 +228,23 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
         <section className="admin-dashboard-card admin-dashboard-card-wide">
           <div style={sectionHead}>
             <h2 style={sectionTitle}>로컬 인제스트</h2>
-            <button onClick={runIngest} disabled={!ingest?.allowed || ingestBusy} style={button}>
+            <button onClick={runIngest} disabled={!ingest?.allowed || ingestBusy || !zipDirInput.trim()} style={button}>
               {ingestBusy ? "실행 중..." : "인제스트 실행"}
             </button>
           </div>
+          <label style={fieldLabel}>
+            로컬 ZIP 폴더
+            <input
+              className="input"
+              value={zipDirInput}
+              onChange={(event) => setZipDirInput(event.target.value)}
+              placeholder="/Users/kdh/Documents/KMU-Wiki-Zips 또는 \\\\NAS\\KMU-Wiki-Zips"
+            />
+          </label>
+          <p style={helperText}>localhost 관리자 화면에서만 실행됩니다. macOS 절대경로, Windows 드라이브, NAS UNC 경로를 입력할 수 있습니다.</p>
           <dl style={detailsGrid}>
-            <Info label="폴더" value={ingest?.zipDir ?? "-"} />
+            <Info label="기본 폴더" value={ingest?.zipDir ?? "-"} />
+            <Info label="실행 폴더" value={zipDirInput.trim() || "-"} />
             <Info label="호스트" value={ingest?.host ?? "-"} />
             <Info label="상태" value={ingest?.allowed ? "실행 가능" : "localhost 전용"} />
           </dl>
@@ -328,7 +347,9 @@ const accountRow: React.CSSProperties = { display: "flex", justifyContent: "spac
 const metricGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 14 };
 const sectionHead: React.CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" };
 const sectionTitle: React.CSSProperties = { margin: 0, fontSize: 20, fontWeight: 700 };
-const detailsGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(220px, 2fr) repeat(2, minmax(120px, 1fr))", gap: 16, margin: "14px 0 0" };
+const fieldLabel: React.CSSProperties = { display: "grid", gap: 8, marginTop: 16, color: "#9aa6d6", fontSize: 13, fontWeight: 600 };
+const helperText: React.CSSProperties = { color: "#6f7aa8", fontSize: 12, margin: "8px 0 0", lineHeight: 1.5 };
+const detailsGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, margin: "14px 0 0" };
 const pillRow: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 };
 const pill: React.CSSProperties = { border: HAIR, background: "rgba(255,255,255,0.06)", borderRadius: 999, padding: "6px 12px", fontSize: 13, color: "#9aa6d6" };
 const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse", marginTop: 12 };

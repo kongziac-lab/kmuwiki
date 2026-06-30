@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   buildIngestCommand,
+  isSupportedLocalFolderPath,
   isLocalIngestAllowed,
   resolveZipDir,
 } from "../lib/localIngest.ts";
@@ -42,6 +43,30 @@ test("ingest command uses configured zip folder without shell interpolation", ()
   assert.equal(command.command, "python");
   assert.deepEqual(command.args, ["-m", "kmu_ingest.cli", "run", "--path", String.raw`\\NAS\KMU Wiki\2026`]);
   assert.equal(command.cwd, String.raw`C:\kmuwiki\ingest`);
+});
+
+test("web local ingest can use an admin supplied absolute zip folder", () => {
+  assert.equal(isSupportedLocalFolderPath("/Users/kdh/Documents/KMU-Wiki-Zips"), true);
+  assert.equal(isSupportedLocalFolderPath(String.raw`Z:\KMU-Wiki-Zips`), true);
+  assert.equal(isSupportedLocalFolderPath(String.raw`\\NAS\KMU-Wiki-Zips`), true);
+  assert.equal(isSupportedLocalFolderPath("KMU-Wiki-Zips"), false);
+
+  const requested = resolveZipDir({}, String.raw`\\NAS\KMU-Wiki-Zips\2026`);
+  const command = buildIngestCommand(requested, { pythonBin: "python", ingestCwd: String.raw`C:\kmuwiki\ingest` });
+
+  assert.deepEqual(command.args, ["-m", "kmu_ingest.cli", "run", "--path", String.raw`\\NAS\KMU-Wiki-Zips\2026`]);
+});
+
+test("admin ingest page posts the selected local folder path", () => {
+  const page = readFileSync(new URL("../app/admin/page.tsx", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/api/admin/ingest/route.ts", import.meta.url), "utf8");
+
+  assert.match(page, /zipDirInput/);
+  assert.match(page, /로컬 ZIP 폴더/);
+  assert.match(page, /JSON\.stringify\(\{ zipDir: zipDirInput\.trim\(\) \}\)/);
+  assert.match(route, /readIngestBody/);
+  assert.match(route, /ingestStatus\(req, body\.zipDir\)/);
+  assert.match(route, /resolveZipDir\(process\.env, requestedZipDir\)/);
 });
 
 test("admin page presents dashboard cards and a collapsed review queue", () => {
