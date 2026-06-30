@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { isIP } from "node:net";
 import path from "node:path";
 
 export const DEFAULT_ZIP_DIR = "/Users/kdh/Documents/KMU-Wiki-Zips";
@@ -38,12 +39,39 @@ export function resolveZipDir(env: LocalIngestEnv = process.env, requestedZipDir
 }
 
 export function isLoopbackHost(host: string | null | undefined): boolean {
-  if (!host) return false;
-  const cleaned = host.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
-  const hostname = cleaned.includes(":") && !cleaned.includes("::")
-    ? cleaned.split(":")[0]
-    : cleaned;
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const hostname = requestHostname(host);
+  if (!hostname) return false;
+  if (hostname === "localhost" || hostname === "::1") return true;
+  if (isIP(hostname) === 4) return hostname.split(".")[0] === "127";
+  return false;
+}
+
+export function isPrivateNetworkHost(host: string | null | undefined): boolean {
+  const hostname = requestHostname(host);
+  if (!hostname) return false;
+  if (isIP(hostname) !== 4) return false;
+
+  const parts = hostname.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [first, second] = parts;
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+    || (first === 169 && second === 254);
+}
+
+function requestHostname(host: string | null | undefined): string {
+  if (!host) return "";
+  const cleaned = host.trim().toLowerCase();
+  if (!cleaned) return "";
+  if (cleaned.startsWith("[")) {
+    const end = cleaned.indexOf("]");
+    return end > 0 ? cleaned.slice(1, end) : cleaned.replace(/^\[/, "").replace(/\]$/, "");
+  }
+  const firstColon = cleaned.indexOf(":");
+  const lastColon = cleaned.lastIndexOf(":");
+  if (firstColon > -1 && firstColon === lastColon) return cleaned.slice(0, firstColon);
+  return cleaned;
 }
 
 export function isLocalIngestAllowed({
@@ -55,9 +83,10 @@ export function isLocalIngestAllowed({
   requestHost?: string | null;
   enableFlag?: string;
 }): boolean {
-  if (!isLoopbackHost(requestHost)) return false;
-  if (enableFlag === "1") return true;
-  return nodeEnv !== "production";
+  const localHost = isLoopbackHost(requestHost) || isPrivateNetworkHost(requestHost);
+  if (!localHost) return false;
+  if (nodeEnv === "production") return enableFlag === "1";
+  return true;
 }
 
 export function resolveIngestCwd(env: LocalIngestEnv = process.env, webCwd = process.cwd()): string {

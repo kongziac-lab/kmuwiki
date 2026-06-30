@@ -36,6 +36,17 @@ python -m kmu_ingest.cli run
 Windows 공유 드라이브나 NAS를 쓰는 경우 해당 컴퓨터의 환경변수를 기본값으로 두거나,
 웹 입력칸에 해당 경로를 넣어 실행한다.
 
+다른 내부망 컴퓨터의 브라우저에서 관리자 화면을 조작하려면 KMU Wiki 프로그램이 설치된
+컴퓨터에서 웹 서버를 LAN에 열어둔다.
+
+```powershell
+cd C:\path\to\kmuwiki\web
+npm run dev -- -H 0.0.0.0
+```
+
+그 다음 다른 컴퓨터에서 `http://프로그램컴퓨터IP:3000/admin`으로 접속한다. ZIP 폴더에는
+NAS/공유폴더 경로(예: `\\172.20.4.110\jdh\kmuwiki`)를 입력한다.
+
 ```bash
 # macOS
 KMU_ZIP_DIR=/Users/kdh/Documents/KMU-Wiki-Zips

@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       throw new ApiError(400, error instanceof Error ? error.message : "invalid ZIP folder");
     }
     if (!status.allowed) {
-      return new Response("local ingest is only available from localhost", { status: 409 });
+      return new Response("local ingest is only available from localhost or a private LAN host", { status: 409 });
     }
 
     const command = buildIngestCommand(status.zipDir);

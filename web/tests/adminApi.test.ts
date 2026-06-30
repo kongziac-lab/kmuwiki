@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   buildIngestCommand,
+  isPrivateNetworkHost,
   isSupportedLocalFolderPath,
   isLocalIngestAllowed,
   resolveZipDir,
@@ -34,6 +35,17 @@ test("local ingest is allowed only from local admin mode", () => {
   assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "localhost:3000" }), true);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "127.0.0.1:3000", enableFlag: "1" }), true);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app", enableFlag: "1" }), false);
+});
+
+test("local ingest allows private LAN hosts in local admin mode", () => {
+  assert.equal(isPrivateNetworkHost("172.20.4.55:3000"), true);
+  assert.equal(isPrivateNetworkHost("192.168.0.25:3000"), true);
+  assert.equal(isPrivateNetworkHost("10.0.0.8"), true);
+  assert.equal(isPrivateNetworkHost("kmuwiki.vercel.app"), false);
+
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "172.20.4.55:3000" }), true);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "172.20.4.55:3000" }), false);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "172.20.4.55:3000", enableFlag: "1" }), true);
 });
 
 test("ingest command uses configured zip folder without shell interpolation", () => {

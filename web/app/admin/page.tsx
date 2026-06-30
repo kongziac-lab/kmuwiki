@@ -241,12 +241,12 @@ function Dashboard({ email, onLogout }: { email: string; onLogout: () => void })
               placeholder="/Users/kdh/Documents/KMU-Wiki-Zips 또는 \\\\NAS\\KMU-Wiki-Zips"
             />
           </label>
-          <p style={helperText}>localhost 관리자 화면에서만 실행됩니다. macOS 절대경로, Windows 드라이브, NAS UNC 경로를 입력할 수 있습니다.</p>
+          <p style={helperText}>localhost 또는 내부망 관리자 화면에서만 실행됩니다. macOS 절대경로, Windows 드라이브, NAS UNC 경로를 입력할 수 있습니다.</p>
           <dl style={detailsGrid}>
             <Info label="기본 폴더" value={ingest?.zipDir ?? "-"} />
             <Info label="실행 폴더" value={zipDirInput.trim() || "-"} />
             <Info label="호스트" value={ingest?.host ?? "-"} />
-            <Info label="상태" value={ingest?.allowed ? "실행 가능" : "localhost 전용"} />
+            <Info label="상태" value={ingest?.allowed ? "실행 가능" : "localhost/내부망 전용"} />
           </dl>
         </section>
 
