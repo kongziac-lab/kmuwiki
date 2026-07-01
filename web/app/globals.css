@@ -147,6 +147,16 @@ h3 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
   box-shadow: 0 0 0 4px rgba(91, 139, 255, 0.14);
 }
 
+select option {
+  color: #111827;
+  background: #ffffff;
+}
+
+select option:checked {
+  color: #ffffff;
+  background: #1f6fd4;
+}
+
 /* 버튼 */
 .btn, button {
   font-family: inherit; font-size: 15px; font-weight: 600; color: var(--text);
