@@ -30,6 +30,45 @@ class FakeClient:
         return FakeRPC(self.captured, name, params)
 
 
+class FakeTableQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.ids = None
+        self.zip_ids = None
+
+    def select(self, _fields):
+        return self
+
+    def in_(self, field, values):
+        if field == "id":
+            self.ids = {str(value) for value in values}
+        if field == "zip_id":
+            self.zip_ids = {str(value) for value in values}
+        return self
+
+    def eq(self, _field, _value):
+        return self
+
+    def execute(self):
+        rows = self.rows
+        if self.ids is not None:
+            rows = [row for row in rows if str(row.get("id")) in self.ids]
+        if self.zip_ids is not None:
+            rows = [row for row in rows if str(row.get("zip_id")) in self.zip_ids]
+        return FakeResp(rows)
+
+
+class FakeCitationClient(FakeClient):
+    def __init__(self, rows, documents):
+        super().__init__(rows)
+        self.documents = documents
+
+    def table(self, name):
+        self.captured["table"] = name
+        self.assert_name = name
+        return FakeTableQuery(self.documents)
+
+
 class FakeEmbedder:
     model = "fake"
     version = "v1"
@@ -63,6 +102,83 @@ class TestRetriever(unittest.TestCase):
     def test_empty_query_short_circuits(self):
         r = Retriever(FakeClient(rows=[]), FakeEmbedder())
         self.assertEqual(r.retrieve("   "), [])
+
+    def test_uses_zip_named_pdf_as_citation_source(self):
+        client = FakeCitationClient(
+            rows=[{
+                "document_id": "attach1", "chunk_index": 0, "content": "첨부 세부 내용", "score": 0.9,
+                "filename": "붙임 1. 세부일정(안).hwp", "doc_no": None, "doc_date": None, "dept": None,
+            }],
+            documents=[
+                {"id": "attach1", "zip_id": "zip1"},
+                {
+                    "id": "main1", "zip_id": "zip1",
+                    "filename": "출장 계획 보고.pdf",
+                    "doc_no": "국제교류팀-777",
+                    "doc_date": "2026-06-30",
+                    "dept": "국제교류팀",
+                    "zip_archives": {
+                        "filename": "출장 계획 보고.zip",
+                        "source_path": "incoming/2026/출장 계획 보고.zip",
+                    },
+                },
+                {
+                    "id": "paper1", "zip_id": "zip1",
+                    "filename": "종이결재 스캔.pdf",
+                    "doc_no": "국제교류팀-888",
+                    "doc_date": "2026-06-29",
+                    "dept": "국제교류팀",
+                    "zip_archives": {
+                        "filename": "출장 계획 보고.zip",
+                        "source_path": "incoming/2026/출장 계획 보고.zip",
+                    },
+                },
+            ],
+        )
+
+        out = Retriever(client, FakeEmbedder()).retrieve("출장 일정")
+
+        self.assertEqual(out[0].filename, "붙임 1. 세부일정(안).hwp")
+        self.assertEqual(out[0].citation_filename, "출장 계획 보고.pdf")
+        self.assertEqual(out[0].citation_doc_no, "국제교류팀-777")
+        self.assertEqual(
+            out[0].label(),
+            "국제교류팀 · 국제교류팀-777 · 2026-06-30 · 출장 계획 보고.pdf",
+        )
+
+    def test_expands_same_zip_documents_for_verification_context(self):
+        client = FakeCitationClient(
+            rows=[],
+            documents=[
+                {"id": "attach1", "zip_id": "zip1"},
+                {
+                    "id": "main1", "zip_id": "zip1",
+                    "filename": "이사회 개최.pdf",
+                    "doc_no": "국제교류팀-680",
+                    "doc_date": "2026-06-26",
+                    "dept": "국제교류팀",
+                    "doc_chunks": [{"chunk_index": 0, "content": "개최형식: 서면결의"}],
+                    "zip_archives": {"filename": "이사회 개최.zip"},
+                },
+                {
+                    "id": "attach1", "zip_id": "zip1",
+                    "filename": "붙임 1. 이사회 자료.hwp",
+                    "doc_no": "국제교류팀-680",
+                    "doc_date": "2026-06-26",
+                    "dept": "국제교류팀",
+                    "doc_chunks": [{"chunk_index": 0, "content": "제20회 이사회 회의자료"}],
+                    "zip_archives": {"filename": "이사회 개최.zip"},
+                },
+            ],
+        )
+        source = Source("attach1", 0, "제20회 이사회 회의자료", 0.9,
+                        filename="붙임 1. 이사회 자료.hwp")
+
+        expanded = Retriever(client, FakeEmbedder()).expand_zip_context([source])
+
+        self.assertGreaterEqual(len(expanded), 2)
+        self.assertTrue(any(s.filename == "이사회 개최.pdf" for s in expanded))
+        self.assertTrue(any("서면결의" in s.content for s in expanded))
 
 
 class TestRagAssembly(unittest.TestCase):
@@ -123,7 +239,7 @@ class TestRagAnswer(unittest.TestCase):
         class FakeLLM:
             messages = FakeMessages()
 
-        out = rag.answer("행사 언제?", sample_sources(), client=FakeLLM())
+        out = rag.answer("행사 내용?", sample_sources(), client=FakeLLM())
         self.assertIn("[1]", out["answer"])
         self.assertEqual(len(out["citations"]), 2)
         # 시스템 프롬프트와 컨텍스트가 전달됐는지

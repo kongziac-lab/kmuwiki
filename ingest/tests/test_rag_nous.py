@@ -42,7 +42,7 @@ class TestNousProvider(unittest.TestCase):
 
     def test_streams_and_passes_config(self):
         out = "".join(rag.stream_answer(
-            "면접 언제?", [_src()], provider="nous", model="Hermes-4-70B",
+            "면접 안내", [_src()], provider="nous", model="Hermes-4-70B",
             nous_key="sk-test", nous_base_url="https://inference-api.nousresearch.com/v1"))
         self.assertEqual(out, "면접은 3월 23일 [1]")
         # 모델/메시지/스트림 인자가 OpenAI 호환으로 전달됐는지

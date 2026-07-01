@@ -69,7 +69,7 @@ class TestGeminiProvider(unittest.TestCase):
 
     def test_streams_with_developer_api_key_and_system_instruction(self):
         out = "".join(rag.stream_answer(
-            "면접 언제?", [_src()], provider="gemini", model="gemini-2.5-pro",
+            "면접 안내", [_src()], provider="gemini", model="gemini-2.5-pro",
             gemini_key="gemini-key"))
 
         self.assertEqual(out, "면접은 3월 23일 [1]")
@@ -82,7 +82,7 @@ class TestGeminiProvider(unittest.TestCase):
 
     def test_streams_with_vertex_region_when_configured(self):
         out = "".join(rag.stream_answer(
-            "면접 언제?", [_src()], provider="gemini", model="gemini-2.5-pro",
+            "면접 안내", [_src()], provider="gemini", model="gemini-2.5-pro",
             gemini_use_vertex=True, gemini_project="kmu-project", gemini_location="asia-northeast3"))
 
         self.assertEqual(out, "면접은 3월 23일 [1]")

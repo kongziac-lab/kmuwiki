@@ -13,6 +13,10 @@ type SearchSource = {
   doc_no?: string | null;
   doc_date?: string | null;
   dept?: string | null;
+  citation_filename?: string | null;
+  citation_doc_no?: string | null;
+  citation_doc_date?: string | null;
+  citation_dept?: string | null;
 };
 
 export default function SearchPage() {
@@ -151,7 +155,12 @@ function Search({ email, onLogout }: { email: string; onLogout: () => void }) {
 }
 
 function label(source: SearchSource): string {
-  const bits = [source.dept, source.doc_no, source.doc_date, source.filename].filter(Boolean);
+  const bits = [
+    source.citation_dept ?? source.dept,
+    source.citation_doc_no ?? source.doc_no,
+    source.citation_doc_date ?? source.doc_date,
+    source.citation_filename ?? source.filename,
+  ].filter(Boolean);
   return bits.length ? bits.join(" · ") : `문서 ${source.document_id.slice(0, 8)}`;
 }
 

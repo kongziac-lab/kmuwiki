@@ -27,6 +27,7 @@ from . import docx_export
 from . import hwpx_export
 from .retriever import Retriever
 from .source_quality import refine_sources
+from .verification import focus_sources
 from .audit import log_access
 
 settings = load_settings()
@@ -96,6 +97,7 @@ async def chat(
     k = int(body.get("k", 8))
     sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
     sources = refine_sources(query, sources, limit=k)
+    answer_sources = retriever.expand_zip_context(focus_sources(query, sources))
     log_access(client, action="chat", query=query, sources=sources)
 
     def sse(event: str, data) -> str:
@@ -104,9 +106,9 @@ async def chat(
     provider, model = settings.resolve_llm()
 
     def gen():
-        yield sse("citations", rag.citations(sources))
+        yield sse("citations", rag.citations(answer_sources))
         for delta in rag.stream_answer(
-            query, sources, provider=provider, model=model,
+            query, answer_sources, provider=provider, model=model,
             anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
             nous_key=settings.nous_api_key, nous_base_url=settings.nous_base_url,
             gemini_key=settings.gemini_api_key,

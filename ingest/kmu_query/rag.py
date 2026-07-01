@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from .retriever import Source
+from .verification import VerificationMemo, build_verification_memo
 
 REFUSAL = "제공된 자료에서 관련 내용을 찾지 못했습니다. 질문을 더 구체화하거나 권한 범위를 확인해 주세요."
 
@@ -17,6 +18,8 @@ SYSTEM_PROMPT = (
     "당신은 대학 행정 문서 위키의 비서입니다. 반드시 아래 '자료'에 있는 내용만 근거로 "
     "한국어로 간결히 답하세요. 각 근거 문장 끝에 [번호] 형식으로 출처를 표기하세요. "
     "자료에 없는 내용은 추측하지 말고 모른다고 답하세요. "
+    "검증 메모의 확정 근거만 사실로 단정하고, 주의/불확실 항목은 단정하지 마세요. "
+    "문서일자·결재일·관련문서일은 본문 행사일시와 구분하세요. "
     "마스킹 토큰([주민등록번호] 등)은 그대로 두고 복원하려 하지 마세요."
 )
 
@@ -25,10 +28,11 @@ def _group_sources(sources: list[Source]) -> list[Source]:
     """같은 문서의 여러 청크를 하나의 인용 번호로 합친다."""
     grouped: dict[str, Source] = {}
     for s in sources:
-        existing = grouped.get(s.document_id)
+        key = s.label() if (s.citation_filename or s.citation_doc_no) else s.document_id
+        existing = grouped.get(key)
         content = s.content.strip()
         if existing is None:
-            grouped[s.document_id] = Source(
+            grouped[key] = Source(
                 document_id=s.document_id,
                 chunk_index=s.chunk_index,
                 content=content,
@@ -37,6 +41,10 @@ def _group_sources(sources: list[Source]) -> list[Source]:
                 doc_no=s.doc_no,
                 doc_date=s.doc_date,
                 dept=s.dept,
+                citation_filename=s.citation_filename,
+                citation_doc_no=s.citation_doc_no,
+                citation_doc_date=s.citation_doc_date,
+                citation_dept=s.citation_dept,
             )
         elif content and content not in existing.content:
             existing.content = f"{existing.content}\n\n{content}".strip()
@@ -51,8 +59,9 @@ def build_context(sources: list[Source]) -> str:
     return "\n\n".join(blocks)
 
 
-def build_user_prompt(query: str, sources: list[Source]) -> str:
-    return f"자료:\n{build_context(sources)}\n\n질문: {query}"
+def build_user_prompt(query: str, sources: list[Source], memo: VerificationMemo | None = None) -> str:
+    memo = memo or build_verification_memo(query, sources)
+    return f"검증 메모:\n{memo.to_prompt_block()}\n\n자료:\n{build_context(sources)}\n\n질문: {query}"
 
 
 def citations(sources: list[Source]) -> list[dict]:
@@ -64,6 +73,10 @@ def citations(sources: list[Source]) -> list[dict]:
         "filename": s.filename,
         "doc_no": s.doc_no,
         "doc_date": s.doc_date,
+        "citation_filename": s.citation_filename,
+        "citation_doc_no": s.citation_doc_no,
+        "citation_doc_date": s.citation_doc_date,
+        "citation_dept": s.citation_dept,
     } for i, s in enumerate(_group_sources(sources), start=1)]
 
 
@@ -73,12 +86,16 @@ def answer(query: str, sources: list[Source], client=None,
     if not sources:
         return {"answer": REFUSAL, "citations": []}
 
+    memo = build_verification_memo(query, sources)
+    if memo.deterministic_answer:
+        return {"answer": memo.deterministic_answer, "citations": citations(sources)}
+
     client = client or _default_client()
     resp = client.messages.create(
         model=model,
         max_tokens=1024,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": build_user_prompt(query, sources)}],
+        messages=[{"role": "user", "content": build_user_prompt(query, sources, memo)}],
     )
     text = "".join(block.text for block in resp.content if block.type == "text")
     return {"answer": text, "citations": citations(sources)}
@@ -103,7 +120,11 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
     if not sources:
         yield REFUSAL
         return
-    prompt = build_user_prompt(query, sources)
+    memo = build_verification_memo(query, sources)
+    if memo.deterministic_answer:
+        yield memo.deterministic_answer
+        return
+    prompt = build_user_prompt(query, sources, memo)
 
     if provider == "anthropic":
         import anthropic
