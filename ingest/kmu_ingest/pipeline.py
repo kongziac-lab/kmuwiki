@@ -83,7 +83,13 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
         return DocStatus.PENDING_PASSWORD
 
     # 3) 파싱
-    pr = extract_text(item.filename, item.data)
+    try:
+        pr = extract_text(item.filename, item.data)
+    except Exception as exc:
+        store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
+                              status=DocStatus.FAILED.value,
+                              error=f"text extraction error: {type(exc).__name__}: {exc}")
+        return DocStatus.FAILED
     from_ocr = False
     if pr.needs_ocr:
         text = deps.ocr.image_to_text(item.data) if deps.ocr.available else ""

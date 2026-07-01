@@ -114,6 +114,23 @@ class TestPipeline(unittest.TestCase):
         st = process(item("빈문서.txt", b"   "), deps)
         self.assertEqual(st, DocStatus.FAILED)
 
+    def test_parser_exception_marks_document_failed(self):
+        deps = make_deps()
+
+        def boom(_filename, _data):
+            raise AssertionError("bad parser state")
+
+        import kmu_ingest.pipeline as pipeline
+
+        original = pipeline.extract_text
+        try:
+            pipeline.extract_text = boom
+            st = process(item("broken.pdf", b"%PDF bad"), deps)
+        finally:
+            pipeline.extract_text = original
+
+        self.assertEqual(st, DocStatus.FAILED)
+
     def test_unparsable_image_without_ocr_is_pending_ocr(self):
         deps = make_deps()  # ocr backend none
         st = process(item("scan.png", b"\x89PNG\r\n\x1a\n fake"), deps)

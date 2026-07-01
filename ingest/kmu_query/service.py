@@ -26,6 +26,7 @@ from . import hermes
 from . import docx_export
 from . import hwpx_export
 from .retriever import Retriever
+from .source_quality import refine_sources
 from .audit import log_access
 
 settings = load_settings()
@@ -74,9 +75,11 @@ async def search(
     require_api_secret(api_secret)
     body = await req.json()
     client, retriever = _client_and_retriever(authorization)
-    sources = retriever.retrieve(
-        body.get("query", ""), int(body.get("k", 8)), body.get("dept"))
-    log_access(client, action="search", query=body.get("query", ""), sources=sources)
+    query = body.get("query", "")
+    k = int(body.get("k", 8))
+    sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
+    sources = refine_sources(query, sources, limit=k)
+    log_access(client, action="search", query=query, sources=sources)
     return JSONResponse({"sources": [s.__dict__ for s in sources]})
 
 
@@ -90,8 +93,9 @@ async def chat(
     body = await req.json()
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
-    sources = retriever.retrieve(
-        query, int(body.get("k", 8)), body.get("dept"))
+    k = int(body.get("k", 8))
+    sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
+    sources = refine_sources(query, sources, limit=k)
     log_access(client, action="chat", query=query, sources=sources)
 
     def sse(event: str, data) -> str:
