@@ -1,6 +1,7 @@
 import io
 import unittest
 import zipfile
+import xml.etree.ElementTree as ET
 
 from kmu_query.hwpx_export import HWPX_MIME, build_approval_hwpx, fill_template_hwpx, safe_hwpx_filename
 
@@ -16,11 +17,30 @@ class TestHwpxExport(unittest.TestCase):
 
         self.assertTrue(data.startswith(b"PK"))
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            self.assertEqual(zf.namelist()[:6], [
+                "mimetype",
+                "version.xml",
+                "Contents/header.xml",
+                "Contents/section0.xml",
+                "Preview/PrvText.txt",
+                "settings.xml",
+            ])
             self.assertEqual(zf.read("mimetype").decode("utf-8"), HWPX_MIME)
             self.assertIn("Contents/content.hpf", zf.namelist())
             self.assertIn("Contents/header.xml", zf.namelist())
+            self.assertIn("settings.xml", zf.namelist())
+            self.assertIn("META-INF/container.rdf", zf.namelist())
+            self.assertIn("META-INF/container.xml", zf.namelist())
+            self.assertIn("META-INF/manifest.xml", zf.namelist())
+            self.assertEqual(zf.getinfo("mimetype").compress_type, zipfile.ZIP_STORED)
+            self.assertEqual(zf.getinfo("META-INF/manifest.xml").compress_type, zipfile.ZIP_DEFLATED)
             section_xml = zf.read("Contents/section0.xml").decode("utf-8")
             preview = zf.read("Preview/PrvText.txt").decode("utf-8")
+            for name in ["version.xml", "settings.xml", "Contents/content.hpf",
+                         "Contents/header.xml", "Contents/section0.xml",
+                         "META-INF/container.xml", "META-INF/manifest.xml",
+                         "META-INF/container.rdf"]:
+                ET.fromstring(zf.read(name))
 
         self.assertIn("전자결재 문서 초안", section_xml)
         self.assertIn("국제교류팀-1843", section_xml)

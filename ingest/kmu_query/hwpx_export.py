@@ -34,23 +34,25 @@ def build_approval_hwpx(
         *(plan or ["사람 검토 필요"]),
     ]
 
+    section_xml = _section_xml(
+        title=clean_title,
+        body_lines=body_lines,
+        source_label=source_label or "검토 필요",
+        approval_form_plan=plan,
+    )
+
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as zf:
-        zf.writestr("mimetype", HWPX_MIME, compress_type=zipfile.ZIP_STORED)
-        zf.writestr("version.xml", _version_xml())
-        zf.writestr("META-INF/container.xml", _container_xml())
-        zf.writestr("Contents/content.hpf", _content_hpf(clean_title))
-        zf.writestr("Contents/header.xml", _header_xml())
-        zf.writestr(
-            "Contents/section0.xml",
-            _section_xml(
-                title=clean_title,
-                body_lines=body_lines,
-                source_label=source_label or "검토 필요",
-                approval_form_plan=plan,
-            ),
-        )
-        zf.writestr("Preview/PrvText.txt", "\n".join(preview_lines))
+        _write_stored(zf, "mimetype", HWPX_MIME.encode("utf-8"))
+        _write_stored(zf, "version.xml", _version_xml().encode("utf-8"))
+        _write_stored(zf, "Contents/header.xml", _header_xml().encode("utf-8"))
+        _write_stored(zf, "Contents/section0.xml", section_xml.encode("utf-8"))
+        _write_stored(zf, "Preview/PrvText.txt", "\n".join(preview_lines).encode("utf-8"))
+        _write_stored(zf, "settings.xml", _settings_xml().encode("utf-8"))
+        _write_deflated(zf, "META-INF/container.rdf", _container_rdf().encode("utf-8"))
+        _write_deflated(zf, "Contents/content.hpf", _content_hpf(clean_title).encode("utf-8"))
+        _write_deflated(zf, "META-INF/container.xml", _container_xml().encode("utf-8"))
+        _write_deflated(zf, "META-INF/manifest.xml", _manifest_xml().encode("utf-8"))
     return out.getvalue()
 
 
@@ -108,9 +110,37 @@ def fill_template_hwpx_from_base64(
     )
 
 
+def _write_stored(zf: zipfile.ZipFile, name: str, data: bytes) -> None:
+    zf.writestr(name, data, compress_type=zipfile.ZIP_STORED)
+
+
+def _write_deflated(zf: zipfile.ZipFile, name: str, data: bytes) -> None:
+    zf.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED)
+
+
 def _version_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="1" buildNumber="0" os="1" xmlVersion="1.5" application="Hancom Office Hangul"/>
+"""
+
+
+def _settings_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<ha:settings xmlns:ha="http://www.hancom.co.kr/hwpml/2011/app">
+  <ha:caretPosition listIDRef="0" paraIDRef="0" pos="0"/>
+</ha:settings>
+"""
+
+
+def _container_rdf() -> str:
     return """<?xml version="1.0" encoding="UTF-8"?>
-<hv:version xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" version="1.0"/>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:pkg="http://www.idpf.org/2007/opf"
+         xmlns:odf="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rdf:Description rdf:about="Contents/content.hpf">
+    <pkg:hasRootfile rdf:resource="Contents/content.hpf"/>
+  </rdf:Description>
+</rdf:RDF>
 """
 
 
@@ -124,6 +154,23 @@ def _container_xml() -> str:
 """
 
 
+def _manifest_xml() -> str:
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest" manifest:version="1.2">
+  <manifest:file-entry manifest:full-path="/" manifest:media-type="{HWPX_MIME}"/>
+  <manifest:file-entry manifest:full-path="mimetype" manifest:media-type="text/plain"/>
+  <manifest:file-entry manifest:full-path="version.xml" manifest:media-type="application/xml"/>
+  <manifest:file-entry manifest:full-path="settings.xml" manifest:media-type="application/xml"/>
+  <manifest:file-entry manifest:full-path="Contents/content.hpf" manifest:media-type="application/hwpml-package+xml"/>
+  <manifest:file-entry manifest:full-path="Contents/header.xml" manifest:media-type="application/xml"/>
+  <manifest:file-entry manifest:full-path="Contents/section0.xml" manifest:media-type="application/xml"/>
+  <manifest:file-entry manifest:full-path="Preview/PrvText.txt" manifest:media-type="text/plain"/>
+  <manifest:file-entry manifest:full-path="META-INF/container.xml" manifest:media-type="application/xml"/>
+  <manifest:file-entry manifest:full-path="META-INF/container.rdf" manifest:media-type="application/rdf+xml"/>
+</manifest:manifest>
+"""
+
+
 def _content_hpf(title: str) -> str:
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <hpf:package xmlns:hpf="http://www.hancom.co.kr/hwpml/2011/hpf" version="1.0">
@@ -133,8 +180,11 @@ def _content_hpf(title: str) -> str:
     <hpf:subject>전자결재 문서 초안</hpf:subject>
   </hpf:metadata>
   <hpf:manifest>
+    <hpf:item id="version" href="../version.xml" media-type="application/xml"/>
+    <hpf:item id="settings" href="../settings.xml" media-type="application/xml"/>
     <hpf:item id="header" href="header.xml" media-type="application/xml"/>
     <hpf:item id="section0" href="section0.xml" media-type="application/xml"/>
+    <hpf:item id="previewText" href="../Preview/PrvText.txt" media-type="text/plain"/>
   </hpf:manifest>
   <hpf:spine>
     <hpf:itemref idref="section0"/>
