@@ -3,7 +3,16 @@ from types import SimpleNamespace
 
 from kmu_query import rag
 from kmu_query.retriever import Retriever, Source
-from kmu_query.service import require_api_secret
+
+
+def load_service_module():
+    try:
+        from kmu_query import service
+    except ModuleNotFoundError as exc:
+        if exc.name == "fastapi":
+            raise unittest.SkipTest("fastapi is not installed in this Python environment")
+        raise
+    return service
 
 
 # ── 가짜 Supabase 클라이언트/응답 ────────────────────────────────
@@ -86,6 +95,31 @@ def sample_sources():
 
 
 class TestRetriever(unittest.TestCase):
+    def test_passes_year_filter_to_hybrid_search(self):
+        client = FakeClient(rows=[{
+            "document_id": "d1",
+            "chunk_index": 0,
+            "content": "content",
+            "score": 0.9,
+            "filename": "f.txt",
+            "doc_no": "DOC-1",
+            "doc_date": "2026-01-01",
+            "dept": "Planning",
+        }])
+        out = Retriever(client, FakeEmbedder()).retrieve(
+            "event schedule",
+            k=5,
+            dept="Planning",
+            year=2026,
+        )
+
+        self.assertEqual(client.captured["name"], "hybrid_search")
+        self.assertEqual(client.captured["params"]["filter_dept"], "Planning")
+        self.assertEqual(client.captured["params"]["filter_year"], 2026)
+        self.assertEqual(client.captured["params"]["match_count"], 5)
+        self.assertEqual(len(client.captured["params"]["query_embedding"]), 1024)
+        self.assertEqual(out[0].doc_no, "DOC-1")
+
     def test_passes_dept_and_embedding(self):
         client = FakeClient(rows=[{
             "document_id": "d1", "chunk_index": 0, "content": "내용", "score": 0.9,
@@ -285,22 +319,43 @@ class TestRagAnswer(unittest.TestCase):
 
 
 class TestApiSecretGate(unittest.TestCase):
+    def test_k_limit_is_bounded_by_server_settings(self):
+        service = load_service_module()
+        original = service.settings
+        service.settings = SimpleNamespace(api_default_k=8, api_max_k=20)
+        try:
+            self.assertEqual(service._bounded_k({"k": 999}), 20)
+            self.assertEqual(service._bounded_k({"k": 0}), 1)
+            self.assertEqual(service._bounded_k({"k": "bad"}), 8)
+            self.assertEqual(service._bounded_k({}, default=12), 12)
+        finally:
+            service.settings = original
+
+    def test_target_year_accepts_only_reasonable_years(self):
+        service = load_service_module()
+        self.assertEqual(service._target_year({"target_year": "2026"}), 2026)
+        self.assertEqual(service._target_year({"year": 2025}), 2025)
+        self.assertIsNone(service._target_year({"target_year": "1999"}))
+        self.assertIsNone(service._target_year({"target_year": "bad"}))
+
     def test_missing_secret_configuration_allows_local_development(self):
+        service = load_service_module()
         settings = SimpleNamespace(api_shared_secret="")
-        require_api_secret(None, settings)
+        service.require_api_secret(None, settings)
 
     def test_matching_secret_is_required_when_configured(self):
+        service = load_service_module()
         settings = SimpleNamespace(api_shared_secret="secret-value")
 
         with self.assertRaises(Exception) as missing:
-            require_api_secret(None, settings)
+            service.require_api_secret(None, settings)
         self.assertEqual(getattr(missing.exception, "status_code", None), 401)
 
         with self.assertRaises(Exception) as wrong:
-            require_api_secret("wrong", settings)
+            service.require_api_secret("wrong", settings)
         self.assertEqual(getattr(wrong.exception, "status_code", None), 401)
 
-        require_api_secret("secret-value", settings)
+        service.require_api_secret("secret-value", settings)
 
 
 if __name__ == "__main__":

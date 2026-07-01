@@ -1,0 +1,71 @@
+# KMU Wiki 운영 구조
+
+## 실행 위치
+
+로컬 PC는 원본 문서 처리 전용입니다.
+
+- ZIP/HWP/HWPX/PDF 인제스트
+- 텍스트 추출
+- 개인정보 마스킹
+- 임베딩 생성
+- Supabase 저장
+
+Vercel은 사용자-facing 기능 전용입니다.
+
+- KMU Wiki 웹 앱
+- 챗봇
+- 문서 검색
+- 업무 활용
+- 보고서 생성
+- HWPX 다운로드 API
+
+Supabase는 권한과 검색 데이터의 단일 저장소입니다.
+
+- 문서 DB
+- 청크
+- 메타데이터
+- RLS 권한 관리
+- 감사 로그
+
+현재 `vercel.json`은 Vercel Services 구조로 설정되어 있습니다. `web/`은 `/`로, `ingest/main.py` FastAPI 서비스는 `/rag`로 노출됩니다.
+
+## 운영 가드레일
+
+- 문서별 청크 상한: `KMU_MAX_CHUNKS_PER_DOC`, 기본 80개
+- 검색 결과 상한: `KMU_API_MAX_K`, 기본 20개
+- 검색 기본값: `KMU_API_DEFAULT_K`, 기본 8개
+- 오래된 감사 로그 보존 기간: `KMU_AUDIT_RETENTION_DAYS`, 기본 180일
+- ZIP 중복 방지: `zip_archives.sha256` unique
+- 문서 중복 방지: `documents.sha256` unique
+- 부서/연도 검색 필터: `/search`, `/chat`, `/insights`, `/hermes`, `/reports`에서 `dept`, `year` 또는 `target_year` 전달
+- pgvector HNSW 인덱스 확인: `admin_storage_health()` RPC의 `indexes.pgvector_hnsw`
+- 감사 로그 정리: `cleanup_access_log(retention_days)` RPC
+- Supabase 용량 모니터링: `admin_storage_health()` RPC의 `database_bytes`, 테이블별 bytes/counts
+
+## 중요 보안 원칙
+
+Vercel 웹 앱에는 Supabase service role key를 넣지 않습니다. 웹/RAG API는 사용자 JWT와 anon key를 사용해 RLS를 적용합니다.
+
+로컬 인제스트 PC에만 `SUPABASE_SERVICE_ROLE_KEY`를 둡니다. 원본 문서 추출, OCR, 마스킹, 임베딩 생성은 로컬에서 끝낸 뒤 결과만 Supabase에 저장합니다.
+
+## 검증 루프
+
+운영 구조와 가드레일이 빠지지 않았는지 빠르게 점검합니다.
+
+```powershell
+python scripts/verify_operational_guardrails.py
+```
+
+주요 단위 테스트를 실행합니다.
+
+```powershell
+$env:PYTHONPATH='ingest'
+python -m unittest ingest.tests.test_operational_guardrails ingest.tests.test_pipeline ingest.tests.test_rag
+```
+
+웹 빌드를 실행합니다.
+
+```powershell
+cd web
+npm run build
+```

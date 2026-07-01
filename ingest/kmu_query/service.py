@@ -59,6 +59,24 @@ def _client_and_retriever(authorization: str | None):
     return client, Retriever(client, _embedder)
 
 
+def _bounded_k(body: dict, *, default: int | None = None) -> int:
+    fallback = default or settings.api_default_k
+    try:
+        requested = int(body.get("k", fallback))
+    except (TypeError, ValueError):
+        requested = fallback
+    return max(1, min(requested, settings.api_max_k))
+
+
+def _target_year(body: dict) -> int | None:
+    value = body.get("target_year") or body.get("year")
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    return year if 2000 <= year <= 2100 else None
+
+
 def require_api_secret(header_secret: str | None, current_settings=settings) -> None:
     """공개 API 직접 호출 차단. 로컬 개발 편의를 위해 미설정이면 비활성."""
     expected = current_settings.api_shared_secret
@@ -78,8 +96,8 @@ async def search(
     body = await req.json()
     client, retriever = _client_and_retriever(authorization)
     query = body.get("query", "")
-    k = int(body.get("k", 8))
-    sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
+    k = _bounded_k(body)
+    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=k)
     sources = focus_sources(query, sources, limit=k)
     log_access(client, action="search", query=query, sources=sources)
@@ -96,8 +114,8 @@ async def chat(
     body = await req.json()
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
-    k = int(body.get("k", 8))
-    sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
+    k = _bounded_k(body)
+    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=k)
     answer_sources = retriever.expand_zip_context(focus_sources(query, sources))
     log_access(client, action="chat", query=query, sources=sources)
@@ -135,7 +153,7 @@ async def build_insights(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     sources = retriever.retrieve(
-        query, int(body.get("k", 12)), body.get("dept"))
+        query, _bounded_k(body, default=12), body.get("dept"), _target_year(body))
     log_access(client, action="insights", query=query, sources=sources)
     report_draft = insights.draft_report(query, sources)
     return JSONResponse({
@@ -161,7 +179,7 @@ async def hermes_report(
     target_year = body.get("target_year")
     client, retriever = _client_and_retriever(authorization)
     sources = retriever.retrieve(
-        query, int(body.get("k", 12)), body.get("dept"))
+        query, _bounded_k(body, default=12), body.get("dept"), _target_year(body))
     log_access(client, action="hermes", query=query, sources=sources)
     drafts = []
     if isinstance(target_year, int):
@@ -185,8 +203,9 @@ async def wiki_report(
     client, retriever = _client_and_retriever(authorization)
     sources = retriever.retrieve(
         query,
-        int(body.get("k", 12)),
+        _bounded_k(body, default=12),
         body.get("dept"),
+        _target_year(body),
     )
     log_access(client, action="reports", query=query, sources=sources)
     target_year = body.get("target_year")

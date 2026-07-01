@@ -130,6 +130,8 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
     searchable_text = strip_boilerplate(masked.text)
     chunks = chunk_text(searchable_text, deps.settings.chunk_chars,
                         deps.settings.chunk_overlap)
+    if len(chunks) > deps.settings.max_chunks_per_doc:
+        chunks = chunks[:deps.settings.max_chunks_per_doc]
     if not chunks:
         store.upsert_document(sha256=sha, zip_id=item.zip_id, meta=meta,
                               status=DocStatus.FAILED.value, error="청크 0개")

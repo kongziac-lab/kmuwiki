@@ -46,7 +46,13 @@ class Retriever:
         self.client = supabase_client
         self.embedder = embedder
 
-    def retrieve(self, query: str, k: int = 8, dept: str | None = None) -> list[Source]:
+    def retrieve(
+        self,
+        query: str,
+        k: int = 8,
+        dept: str | None = None,
+        year: int | None = None,
+    ) -> list[Source]:
         if not query or not query.strip():
             return []
         # 쿼리 전용 임베딩(Cohere 등은 search_query input_type 사용)
@@ -59,6 +65,7 @@ class Retriever:
             "query_text": query,
             "match_count": k,
             "filter_dept": dept,
+            "filter_year": year,
         }).execute()
         rows = res.data or []
         sources = [Source(

@@ -46,6 +46,7 @@ class Settings:
     # 청킹
     chunk_chars: int = int(os.environ.get("KMU_CHUNK_CHARS", "1200"))
     chunk_overlap: int = int(os.environ.get("KMU_CHUNK_OVERLAP", "200"))
+    max_chunks_per_doc: int = int(os.environ.get("KMU_MAX_CHUNKS_PER_DOC", "80"))
 
     # Supabase (service_role 키는 워커 전용; 클라이언트에 절대 노출 금지)
     supabase_url: str = os.environ.get("SUPABASE_URL", "")
@@ -75,6 +76,9 @@ class Settings:
     cohere_chat_model: str = os.environ.get("KMU_COHERE_CHAT_MODEL", "command-r-plus-08-2024")
     # 웹 프록시 ↔ Python API 사이의 공유 시크릿. 설정된 경우 /search, /chat은 이 헤더가 필요하다.
     api_shared_secret: str = os.environ.get("KMU_API_SHARED_SECRET", "")
+    api_max_k: int = int(os.environ.get("KMU_API_MAX_K", "20"))
+    api_default_k: int = int(os.environ.get("KMU_API_DEFAULT_K", "8"))
+    audit_retention_days: int = int(os.environ.get("KMU_AUDIT_RETENTION_DAYS", "180"))
 
     def resolve_llm(self) -> tuple[str, str]:
         """(provider, model). 명시(KMU_LLM_PROVIDER) 우선. 자동은 anthropic 키 있으면 anthropic, 없으면 cohere.

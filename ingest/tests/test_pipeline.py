@@ -207,6 +207,30 @@ class TestPipeline(unittest.TestCase):
         self.assertNotIn("시행 국제교류팀-155", embedded)
         self.assertTrue(all(not c.content.startswith("[") for c in store.chunks))
 
+    def test_limits_chunks_per_document(self):
+        store = CapturingStore()
+        embedder = CapturingEmbedder()
+        deps = Deps(
+            settings=Settings(
+                dry_run=True,
+                embed_provider="fake",
+                chunk_chars=30,
+                chunk_overlap=0,
+                max_chunks_per_doc=3,
+            ),
+            store=store,
+            masker=Masker(enable_ner=False),
+            ocr=OCREngine("none"),
+            embedder=embedder,
+        )
+        text = "\n\n".join(f"문단 {i} " + ("가" * 80) for i in range(10))
+
+        st = process(item("long.txt", text.encode()), deps)
+
+        self.assertEqual(st, DocStatus.PROCESSED)
+        self.assertEqual(len(store.chunks), 3)
+        self.assertEqual(len(embedder.texts), 3)
+
     def test_pipeline_stores_knowledge_organization_metadata(self):
         store = CapturingStore()
         deps = Deps(

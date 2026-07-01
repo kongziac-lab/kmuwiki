@@ -30,6 +30,14 @@ test("admin dashboard migration defines required SECURITY DEFINER RPCs", () => {
   assert.match(sql, /auth\.uid\(\)/i);
 });
 
+test("admin summary API exposes storage health monitoring", () => {
+  const route = readFileSync(new URL("../app/api/admin/summary/route.ts", import.meta.url), "utf8");
+
+  assert.match(route, /admin_dashboard_summary/);
+  assert.match(route, /admin_storage_health/);
+  assert.match(route, /storage_health/);
+});
+
 test("local ingest is allowed only from local admin mode", () => {
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app" }), false);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "localhost:3000" }), true);
