@@ -1,4 +1,0 @@
-interface:
-  display_name: "HWPX Autofill Conversion"
-  short_description: "Safely fill and repackage HWPX templates"
-  default_prompt: "Use $hwpx-autofill-conversion to fill this attached HWPX form with the provided topic and return a valid HWPX file."

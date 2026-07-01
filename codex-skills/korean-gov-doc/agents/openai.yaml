@@ -1,4 +1,0 @@
-interface:
-  display_name: "Korean Gov Doc"
-  short_description: "Official Korean public document drafting"
-  default_prompt: "Use $korean-gov-doc to draft a formal Korean public-institution cooperation request document."

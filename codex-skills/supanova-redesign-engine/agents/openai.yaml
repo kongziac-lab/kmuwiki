@@ -1,4 +1,0 @@
-interface:
-  display_name: "Supanova Redesign Engine"
-  short_description: "Upgrade existing landing pages with polish"
-  default_prompt: "Use $supanova-redesign-engine to improve this existing landing page while preserving its structure."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Badge Background Templates"
-  short_description: "Print-ready SVG badge background templates"
-  default_prompt: "Use $badge-background-templates to create eight print-ready SVG badge background variations for a university conference."
