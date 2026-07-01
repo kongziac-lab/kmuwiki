@@ -120,6 +120,34 @@ class TestVerificationMode(unittest.TestCase):
 
         self.assertEqual([s.document_id for s in focused], ["b"])
 
+    def test_focus_sources_expands_consulate_to_consul_and_vice_consul(self):
+        sources = [
+            Source("changchun", 0, "중국 장춘대학교 대표단 내방 일정", 0.9,
+                   filename="중국 장춘대학교 대표단 내방 일정 진행.pdf"),
+            Source("consul", 0, "주부산중국총영사 일행 내방일시: 2026. 5. 30.", 0.8,
+                   filename="주부산중국총영사 내방 업무 진행.pdf"),
+            Source("vice", 0, "주부산중국부총영사 내방일시: 2026. 3. 24.", 0.7,
+                   filename="일정계획(안).hwp"),
+        ]
+
+        focused = focus_sources("주부산중국총영사관 관련 일정은 어떻게 되나", sources)
+
+        self.assertEqual([s.document_id for s in focused], ["consul", "vice"])
+
+    def test_schedule_question_reports_multiple_focused_dates(self):
+        sources = [
+            Source("consul", 0, "주부산중국총영사 내방일시: 2026. 5. 30.(토) 11:30~14:00", 0.8,
+                   filename="주부산중국총영사 내방 업무 진행.pdf"),
+            Source("vice", 0, "주부산중국부총영사 내방일시: 2026. 3. 24.(화) 10:30~13:20", 0.7,
+                   filename="주부산중국부총영사 내방 업무 진행.pdf"),
+        ]
+
+        memo = build_verification_memo("주부산중국총영사관 관련 일정은 어떻게 되나", sources)
+
+        self.assertEqual(memo.query_type, "date")
+        self.assertIn("2026. 5. 30", memo.deterministic_answer or "")
+        self.assertIn("2026. 3. 24", memo.deterministic_answer or "")
+
 
 if __name__ == "__main__":
     unittest.main()

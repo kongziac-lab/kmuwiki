@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .retriever import Source
 
 
-DATE_TERMS = ("언제", "일시", "날짜", "개최일", "방문일", "출장기간", "기간")
+DATE_TERMS = ("언제", "일정", "일시", "날짜", "개최일", "방문일", "출장기간", "기간")
 COUNT_TERMS = ("몇 명", "몇명", "인원", "명단", "몇 개", "건수")
 MONEY_TERMS = ("금액", "예산", "결산", "소요", "달러", "원")
 PLACE_TERMS = ("어디", "장소", "위치")
@@ -237,7 +237,8 @@ def _focus_terms(query: str) -> tuple[str, ...]:
     raw_terms = [term for term in normalized.split() if len(term) >= 2]
     stop_terms = {
         "언제", "일시", "날짜", "개최", "개최되었나", "개최되었는가",
-        "무엇", "어떻게", "있는가", "인가", "대한", "관련",
+        "무엇", "어떻게", "있는가", "인가", "대한", "관련", "되나", "되었나",
+        "일정", "내용", "정리",
     }
     terms = []
     for term in raw_terms:
@@ -246,6 +247,15 @@ def _focus_terms(query: str) -> tuple[str, ...]:
             continue
         if compact and compact not in stop_terms and compact not in terms:
             terms.append(compact)
+    expanded: list[str] = []
+    for term in terms:
+        expanded.append(term)
+        if "주부산중국총영사관" in term or "총영사관" in term:
+            expanded.extend(["주부산중국총영사", "주부산중국부총영사"])
+    terms = []
+    for term in expanded:
+        if term not in terms:
+            terms.append(term)
     return tuple(terms[:5])
 
 
@@ -255,6 +265,8 @@ def _matches_focus(text: str, focus_terms: tuple[str, ...]) -> bool:
     compact_text = re.sub(r"\s+", "", text)
     if "이사회" in focus_terms and "이사회" not in compact_text:
         return False
+    if any("총영사관" in term for term in focus_terms):
+        return "주부산중국총영사" in compact_text or "주부산중국부총영사" in compact_text
     hits = sum(1 for term in focus_terms if re.sub(r"\s+", "", term) in compact_text)
     return hits >= max(1, min(len(focus_terms), 2))
 
@@ -264,9 +276,24 @@ def _date_answer_from_event_hits(
     event_hits: list[tuple[int, str, str]],
     form_hits: list[tuple[int, str]],
 ) -> str:
-    idx, sentence, _label = event_hits[0]
+    seen: set[tuple[int, str]] = set()
+    lines = []
+    for idx, sentence, label in event_hits:
+        summary = _event_date_summary(sentence)
+        key = (idx, _primary_date(summary) or summary)
+        if key in seen:
+            continue
+        seen.add(key)
+        source_title = _source_title(label)
+        lines.append(f"{source_title}: {summary} [{idx}]")
+        if len(lines) >= 5:
+            break
     form = " 개최형식은 서면결의입니다." if form_hits else ""
-    return f"자료에서 확인되는 일시는 다음 근거입니다: {_short(sentence)} [{idx}].{form}"
+    if len(lines) == 1:
+        return f"자료에서 확인되는 일시는 다음 근거입니다: {lines[0]}.{form}"
+    return f"자료에서 확인되는 일정은 다음과 같습니다. " + " ".join(
+        f"{i + 1}. {line}" for i, line in enumerate(lines)
+    ) + form
 
 
 def _date_answer_without_event_hit(
@@ -300,6 +327,35 @@ def _date_uncertain_notes(
         idx, date, _label = doc_dates[0]
         notes.append(f"[{idx}] 문서일자 {date}는 행사일과 구분해야 합니다.")
     return notes
+
+
+def _event_date_summary(text: str) -> str:
+    text = _compact(text)
+    patterns = (
+        r"(내방일시\s*[:：]?\s*20\d{2}.{0,70})",
+        r"(방문일\s*[:：]?\s*20\d{2}.{0,70})",
+        r"(개최일시\s*[:：]?\s*20\d{2}.{0,70})",
+        r"(행사일시\s*[:：]?\s*20\d{2}.{0,70})",
+        r"((?<!관련\s)일시\s*[:：]?\s*20\d{2}.{0,70})",
+        r"(기간\s*[:：]?\s*20\d{2}.{0,90})",
+        r"(출장기간\s*[:：]?\s*20\d{2}.{0,90})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        summary = re.split(r"\s(?:주요내용|소요예산|장소|대상|비고|[가-하]\.|[0-9]+\.\s+(?!\d))", match.group(1), maxsplit=1)[0]
+        return _short(summary, 100)
+    return _short(text, 120)
+
+
+def _primary_date(text: str) -> str | None:
+    match = DATE_PATTERN.search(text)
+    return match.group(0) if match else None
+
+
+def _source_title(label: str) -> str:
+    return label.split(" · ")[-1] if label else "자료"
 
 
 def _group_for_citations(sources: list[Source]) -> list[Source]:

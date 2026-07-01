@@ -80,6 +80,7 @@ async def search(
     k = int(body.get("k", 8))
     sources = retriever.retrieve(query, max(k * 3, k), body.get("dept"))
     sources = refine_sources(query, sources, limit=k)
+    sources = focus_sources(query, sources, limit=k)
     log_access(client, action="search", query=query, sources=sources)
     return JSONResponse({"sources": [s.__dict__ for s in sources]})
 
