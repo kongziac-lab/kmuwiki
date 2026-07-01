@@ -1,0 +1,4 @@
+interface:
+  display_name: "Supanova Full Output"
+  short_description: "Complete landing pages without placeholders"
+  default_prompt: "Use $supanova-full-output to generate a complete standalone Korean landing page with every required section fully written."

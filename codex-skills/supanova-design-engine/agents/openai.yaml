@@ -1,0 +1,4 @@
+interface:
+  display_name: "Supanova Design Engine"
+  short_description: "Premium standalone Korean landing pages"
+  default_prompt: "Use $supanova-design-engine to create a complete standalone Korean landing page for this offer."
