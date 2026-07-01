@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+from base64 import b64decode
 from xml.sax.saxutils import escape
 
 
 HWPX_MIME = "application/hwp+zip"
+_TEXT_NODE_RE = re.compile(r"(<hp:t\b[^>]*>)(.*?)(</hp:t>)", re.DOTALL)
 
 
 def build_approval_hwpx(
@@ -58,6 +60,52 @@ def safe_hwpx_filename(title: str) -> str:
     filename = re.sub(r"\.[^.]+$", "", filename)
     filename = filename.strip(". ") or "draft"
     return f"{filename}.hwpx"
+
+
+def fill_template_hwpx(
+    *,
+    template_data: bytes,
+    title: str,
+    body: str,
+) -> bytes:
+    """Fill an uploaded HWPX template while preserving package metadata.
+
+    Version 1 intentionally performs conservative text-node replacement: it
+    keeps all XML structure, styles, tables, and ZIP entry metadata, and only
+    rewrites existing ``<hp:t>`` text nodes in section XML files.
+    """
+
+    lines = _template_lines(title=title, body=body)
+    source = io.BytesIO(template_data)
+    out = io.BytesIO()
+    with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(out, "w") as zout:
+        section_names = _section_names(zin)
+        remaining = list(lines)
+        for original_info in zin.infolist():
+            data = zin.read(original_info.filename)
+            if original_info.filename in section_names:
+                text = data.decode("utf-8")
+                text, remaining = _replace_text_nodes(text, remaining)
+                data = text.encode("utf-8")
+            elif original_info.filename == "Preview/PrvText.txt":
+                data = "\n".join(lines).encode("utf-8")
+            elif original_info.filename == "Contents/content.hpf":
+                data = _replace_package_title(data, title)
+            zout.writestr(_copy_zip_info(original_info), data)
+    return out.getvalue()
+
+
+def fill_template_hwpx_from_base64(
+    *,
+    template_base64: str,
+    title: str,
+    body: str,
+) -> bytes:
+    return fill_template_hwpx(
+        template_data=b64decode(template_base64),
+        title=title,
+        body=body,
+    )
 
 
 def _version_xml() -> str:
@@ -162,6 +210,58 @@ def _paragraph(text: str, para_pr_id: int = 0, char_pr_id: int = 0) -> str:
 def _body_lines(body: str) -> list[str]:
     lines = [line.strip() for line in body.splitlines()]
     return [line for line in lines if line] or ["본문 초안 없음"]
+
+
+def _template_lines(*, title: str, body: str) -> list[str]:
+    return [_strip_hwpx_extension(safe_hwpx_filename(title)), *_body_lines(body)]
+
+
+def _section_names(zf: zipfile.ZipFile) -> set[str]:
+    return {
+        name
+        for name in zf.namelist()
+        if name.startswith("Contents/section") and name.endswith(".xml")
+    }
+
+
+def _replace_text_nodes(section_xml: str, lines: list[str]) -> tuple[str, list[str]]:
+    cursor = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal cursor
+        replacement = lines[cursor] if cursor < len(lines) else ""
+        cursor += 1
+        return f"{match.group(1)}{_xml(replacement)}{match.group(3)}"
+
+    return _TEXT_NODE_RE.sub(repl, section_xml), lines[cursor:]
+
+
+def _replace_package_title(data: bytes, title: str) -> bytes:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    title_text = _strip_hwpx_extension(safe_hwpx_filename(title))
+    text = re.sub(
+        r"(<hpf:title\b[^>]*>)(.*?)(</hpf:title>)",
+        lambda match: f"{match.group(1)}{_xml(title_text)}{match.group(3)}",
+        text,
+        count=1,
+        flags=re.DOTALL,
+    )
+    return text.encode("utf-8")
+
+
+def _copy_zip_info(original: zipfile.ZipInfo) -> zipfile.ZipInfo:
+    copied = zipfile.ZipInfo(original.filename, date_time=original.date_time)
+    copied.compress_type = original.compress_type
+    copied.comment = original.comment
+    copied.extra = original.extra
+    copied.internal_attr = original.internal_attr
+    copied.external_attr = original.external_attr
+    copied.create_system = original.create_system
+    copied.flag_bits = original.flag_bits
+    return copied
 
 
 def _strip_hwpx_extension(filename: str) -> str:

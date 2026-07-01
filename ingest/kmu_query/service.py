@@ -23,6 +23,7 @@ from kmu_ingest.embedding import make_embedder
 from . import rag
 from . import insights
 from . import hermes
+from . import reports
 from . import docx_export
 from . import hwpx_export
 from .retriever import Retriever
@@ -172,6 +173,36 @@ async def hermes_report(
     })
 
 
+@app.post("/reports")
+async def wiki_report(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    body = await req.json()
+    query = body.get("query", "")
+    client, retriever = _client_and_retriever(authorization)
+    sources = retriever.retrieve(
+        query,
+        int(body.get("k", 12)),
+        body.get("dept"),
+    )
+    log_access(client, action="reports", query=query, sources=sources)
+    target_year = body.get("target_year")
+    if not isinstance(target_year, int):
+        target_year = None
+    return JSONResponse(reports.build_wiki_report(
+        query,
+        sources,
+        report_type=body.get("report_type") or "result",
+        target_year=target_year,
+        recipient=body.get("recipient") or "[수신처]",
+        sender=body.get("sender") or "[발신기관명]",
+        dept=body.get("dept"),
+    ))
+
+
 @app.post("/hermes/docx")
 async def hermes_docx(
     req: Request,
@@ -216,6 +247,33 @@ async def hermes_hwpx(
         source_label=body.get("source_label") or "",
         approval_form_plan=body.get("approval_form_plan") or [],
     )
+    quoted = quote(filename)
+    return Response(
+        data,
+        media_type=hwpx_export.HWPX_MIME,
+        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
+    )
+
+
+@app.post("/reports/template-hwpx")
+async def report_template_hwpx(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    require_api_secret(api_secret)
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing authorization")
+    body = await req.json()
+    filename = hwpx_export.safe_hwpx_filename(body.get("title") or "wiki-report")
+    try:
+        data = hwpx_export.fill_template_hwpx_from_base64(
+            template_base64=body.get("template_base64") or "",
+            title=filename,
+            body=body.get("body") or "",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid hwpx template: {exc}") from exc
     quoted = quote(filename)
     return Response(
         data,

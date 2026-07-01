@@ -2,12 +2,13 @@
 
 import type { ReactNode } from "react";
 
-type ActivePage = "chat" | "search" | "insights" | "workflows" | "admin";
+type ActivePage = "chat" | "search" | "insights" | "reports" | "workflows" | "admin";
 
 const NAV_ITEMS: Array<{ key: ActivePage; href: string; label: string }> = [
   { key: "chat", href: "/", label: "챗봇" },
   { key: "search", href: "/search", label: "문서 검색" },
   { key: "insights", href: "/insights", label: "업무 활용" },
+  { key: "reports", href: "/reports", label: "보고서 생성" },
   { key: "workflows", href: "/workflows", label: "업무흐름도" },
   { key: "admin", href: "/admin", label: "관리자" },
 ];
