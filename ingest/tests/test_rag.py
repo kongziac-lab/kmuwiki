@@ -143,8 +143,45 @@ class TestRetriever(unittest.TestCase):
         self.assertEqual(out[0].citation_doc_no, "국제교류팀-777")
         self.assertEqual(
             out[0].label(),
-            "국제교류팀 · 국제교류팀-777 · 2026-06-30 · 출장 계획 보고.pdf",
+            "국제교류팀-777 · 2026-06-30 · 출장 계획 보고.pdf",
         )
+
+    def test_falls_back_to_zip_named_pdf_when_representative_pdf_missing(self):
+        client = FakeCitationClient(
+            rows=[{
+                "document_id": "attach1", "chunk_index": 0, "content": "첨부 내용", "score": 0.9,
+                "filename": "일정계획(안).hwp", "doc_no": None, "doc_date": None, "dept": None,
+            }],
+            documents=[
+                {
+                    "id": "attach1", "zip_id": "zip1",
+                    "filename": "일정계획(안).hwp",
+                    "doc_no": None,
+                    "doc_date": None,
+                    "dept": None,
+                    "zip_archives": {
+                        "filename": "주부산중국부총영사 내방 업무 진행.zip",
+                        "source_path": "2026/김동하/주부산중국부총영사 내방 업무 진행.zip",
+                    },
+                },
+            ],
+        )
+
+        out = Retriever(client, FakeEmbedder()).retrieve("부총영사 내방")
+
+        self.assertEqual(out[0].citation_filename, "주부산중국부총영사 내방 업무 진행.pdf")
+        self.assertEqual(out[0].label(), "주부산중국부총영사 내방 업무 진행.pdf")
+
+    def test_label_omits_dept_when_doc_no_already_contains_dept(self):
+        source = Source(
+            "d1", 0, "내용", 0.9,
+            filename="문서.pdf",
+            doc_no="국제교류팀-499",
+            doc_date="2026-05-22",
+            dept="국제교류팀",
+        )
+
+        self.assertEqual(source.label(), "국제교류팀-499 · 2026-05-22 · 문서.pdf")
 
     def test_expands_same_zip_documents_for_verification_context(self):
         client = FakeCitationClient(

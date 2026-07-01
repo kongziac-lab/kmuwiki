@@ -155,9 +155,14 @@ function Search({ email, onLogout }: { email: string; onLogout: () => void }) {
 }
 
 function label(source: SearchSource): string {
+  let dept = source.citation_dept ?? source.dept;
+  const docNo = source.citation_doc_no ?? source.doc_no;
+  if (dept && docNo?.startsWith(`${dept}-`)) {
+    dept = null;
+  }
   const bits = [
-    source.citation_dept ?? source.dept,
-    source.citation_doc_no ?? source.doc_no,
+    dept,
+    docNo,
     source.citation_doc_date ?? source.doc_date,
     source.citation_filename ?? source.filename,
   ].filter(Boolean);

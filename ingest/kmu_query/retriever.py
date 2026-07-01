@@ -28,9 +28,13 @@ class Source:
 
     def label(self) -> str:
         """인용 표기용 짧은 출처 라벨."""
+        dept = self.citation_dept or self.dept
+        doc_no = self.citation_doc_no or self.doc_no
+        if dept and doc_no and doc_no.startswith(f"{dept}-"):
+            dept = None
         bits = [b for b in (
-            self.citation_dept or self.dept,
-            self.citation_doc_no or self.doc_no,
+            dept,
+            doc_no,
             self.citation_doc_date or self.doc_date,
             self.citation_filename or self.filename,
         ) if b]
@@ -101,7 +105,7 @@ class Retriever:
             zip_ids = sorted({str(row.get("zip_id")) for row in docs.values() if row.get("zip_id")})
             if not zip_ids:
                 return sources
-            reps = self._fetch_representative_documents(zip_ids)
+            reps = self._fetch_representative_documents(zip_ids, docs)
         except Exception:
             return sources
 
@@ -120,13 +124,13 @@ class Retriever:
     def _fetch_source_documents(self, document_ids: list[str]) -> dict[str, dict]:
         res = (
             self.client.table("documents")
-            .select("id,zip_id")
+            .select("id,zip_id,zip_archives(filename,source_path)")
             .in_("id", document_ids)
             .execute()
         )
         return {str(row["id"]): row for row in (res.data or [])}
 
-    def _fetch_representative_documents(self, zip_ids: list[str]) -> dict[str, dict]:
+    def _fetch_representative_documents(self, zip_ids: list[str], source_docs: dict[str, dict]) -> dict[str, dict]:
         res = (
             self.client.table("documents")
             .select("id,zip_id,filename,doc_no,doc_date,dept,zip_archives(filename,source_path)")
@@ -137,11 +141,14 @@ class Retriever:
         by_zip: dict[str, list[dict]] = {}
         for row in rows:
             by_zip.setdefault(str(row.get("zip_id")), []).append(row)
-        return {
+        representatives = {
             zip_id: rep
             for zip_id, group in by_zip.items()
             if (rep := _representative_pdf(group)) is not None
         }
+        for zip_id, fallback in _fallback_representatives(zip_ids, source_docs).items():
+            representatives.setdefault(zip_id, fallback)
+        return representatives
 
     def _fetch_zip_chunk_sources(self, zip_ids: list[str], *, limit_per_zip: int) -> list[Source]:
         res = (
@@ -200,6 +207,20 @@ def _representative_pdf(rows: list[dict]) -> dict | None:
     )[0]
 
 
+def _fallback_representatives(zip_ids: list[str], source_docs: dict[str, dict]) -> dict[str, dict]:
+    """대표 PDF 행이 DB에 없을 때 ZIP 파일명으로 표시용 대표 PDF명을 복원한다."""
+    fallbacks: dict[str, dict] = {}
+    for zip_id in zip_ids:
+        docs = [row for row in source_docs.values() if str(row.get("zip_id")) == zip_id]
+        names = [name for row in docs for name in _zip_names(row.get("zip_archives"))]
+        stem = next((_stem(name) for name in names if _stem(name)), "")
+        display = next((_display_stem(name) for name in names if _display_stem(name)), "")
+        if not stem or not display:
+            continue
+        fallbacks[zip_id] = {"filename": f"{display}.pdf"}
+    return fallbacks
+
+
 def _zip_context_sort_key(row: dict) -> tuple:
     filename = str(row.get("filename") or "")
     has_doc_no = 0 if row.get("doc_no") else 1
@@ -225,3 +246,12 @@ def _stem(name: str | None) -> str:
     filename = PurePosixPath(PureWindowsPath(filename).name).name
     filename = re.sub(r"\.(zip|pdf)$", "", filename, flags=re.IGNORECASE)
     return re.sub(r"\s+", "", filename).lower()
+
+
+def _display_stem(name: str | None) -> str:
+    if not name:
+        return ""
+    filename = str(name).replace("\\", "/").split("/")[-1]
+    filename = PurePosixPath(PureWindowsPath(filename).name).name
+    filename = re.sub(r"\.(zip|pdf)$", "", filename, flags=re.IGNORECASE)
+    return filename.strip()
