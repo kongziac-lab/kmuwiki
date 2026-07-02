@@ -251,6 +251,49 @@ class TestRetriever(unittest.TestCase):
         self.assertTrue(any(s.filename == "이사회 개최.pdf" for s in expanded))
         self.assertTrue(any("서면결의" in s.content for s in expanded))
 
+    def test_full_zip_expansion_respects_char_budget(self):
+        client = FakeCitationClient(
+            rows=[],
+            documents=[
+                {"id": "attach1", "zip_id": "zip1"},
+                {
+                    "id": "main1", "zip_id": "zip1",
+                    "filename": "이사회 개최.pdf",
+                    "doc_no": "국제교류팀-680",
+                    "doc_date": "2026-06-26",
+                    "dept": "국제교류팀",
+                    "doc_chunks": [
+                        {"chunk_index": i, "content": "가" * 100} for i in range(5)
+                    ],
+                    "zip_archives": {"filename": "이사회 개최.zip"},
+                },
+                {
+                    "id": "attach1", "zip_id": "zip1",
+                    "filename": "붙임 1. 이사회 자료.hwp",
+                    "doc_no": None,
+                    "doc_date": None,
+                    "dept": None,
+                    "doc_chunks": [
+                        {"chunk_index": i, "content": "나" * 100} for i in range(5)
+                    ],
+                    "zip_archives": {"filename": "이사회 개최.zip"},
+                },
+            ],
+        )
+        source = Source("attach1", 3, "질의에 걸린 첨부 청크", 0.9,
+                        filename="붙임 1. 이사회 자료.hwp")
+
+        expanded = Retriever(client, FakeEmbedder()).expand_zip_context(
+            [source], limit_per_zip=None, char_budget=250)
+
+        # 예산 250자 → 결재 PDF 청크(100자)가 첨부보다 먼저 2개까지만 확장된다.
+        expansion = [s for s in expanded if (s.document_id, s.chunk_index) != ("attach1", 3)]
+        self.assertEqual(len(expansion), 2)
+        self.assertTrue(all(s.document_id == "main1" for s in expansion))
+        # 검색으로 이미 잡힌 원본 소스는 예산과 무관하게 항상 유지된다.
+        self.assertTrue(any(
+            (s.document_id, s.chunk_index) == ("attach1", 3) for s in expanded))
+
 
 class TestRagAssembly(unittest.TestCase):
     def test_build_context_numbered_with_labels(self):

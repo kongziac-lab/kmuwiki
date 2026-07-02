@@ -2,12 +2,23 @@ import unittest
 
 from kmu_query import rag
 from kmu_query.retriever import Source
-from kmu_query.verification import build_verification_memo, classify_question, focus_sources
+from kmu_query.verification import (
+    build_verification_memo,
+    classify_question,
+    focus_sources,
+    needs_full_zip_context,
+)
 
 
 class TestVerificationMode(unittest.TestCase):
     def test_classifies_date_question(self):
         self.assertEqual(classify_question("공자아카데미 이사회는 언제 개최되었나?"), "date")
+
+    def test_verification_sensitive_questions_use_full_zip_context(self):
+        self.assertTrue(needs_full_zip_context("이사회는 언제 개최되었나?"))
+        self.assertTrue(needs_full_zip_context("행사 소요 예산은 얼마인가?"))
+        self.assertTrue(needs_full_zip_context("참석 인원은 몇 명인가?"))
+        self.assertFalse(needs_full_zip_context("공자아카데미 사업을 요약해줘"))
 
     def test_date_question_does_not_treat_doc_date_as_event_date(self):
         sources = [

@@ -69,6 +69,11 @@ def classify_question(query: str) -> str:
     return "general"
 
 
+def needs_full_zip_context(query: str) -> bool:
+    """검증 민감 질문(날짜/인원/금액/장소/결재)이면 ZIP 전체를 대조 자료로 쓴다."""
+    return classify_question(query) != "general"
+
+
 def build_verification_memo(query: str, sources: list[Source]) -> VerificationMemo:
     query_type = classify_question(query)
     if not sources:

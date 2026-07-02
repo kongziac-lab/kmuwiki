@@ -28,7 +28,7 @@ from . import docx_export
 from . import hwpx_export
 from .retriever import Retriever
 from .source_quality import refine_sources
-from .verification import focus_sources
+from .verification import focus_sources, needs_full_zip_context
 from .audit import log_access
 
 settings = load_settings()
@@ -117,7 +117,9 @@ async def chat(
     k = _bounded_k(body)
     sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=k)
-    answer_sources = retriever.expand_zip_context(focus_sources(query, sources))
+    # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
+    zip_limit = None if needs_full_zip_context(query) else 12
+    answer_sources = retriever.expand_zip_context(focus_sources(query, sources), limit_per_zip=zip_limit)
     log_access(client, action="chat", query=query, sources=sources)
 
     def sse(event: str, data) -> str:

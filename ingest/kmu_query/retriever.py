@@ -41,6 +41,11 @@ class Source:
         return " · ".join(bits) if bits else f"문서 {self.document_id[:8]}"
 
 
+# ZIP 전체 투입(limit_per_zip=None) 시 총 문자 수 상한. 한국어 약 1자≈1토큰이므로
+# 15만 자로 두면 Gemini 저가 요금 티어(프롬프트 20만 토큰)와 컨텍스트 한도를 넘지 않는다.
+FULL_ZIP_CHAR_BUDGET = 150_000
+
+
 class Retriever:
     def __init__(self, supabase_client, embedder):
         self.client = supabase_client
@@ -80,16 +85,31 @@ class Retriever:
         ) for r in rows]
         return self._with_representative_citations(sources)
 
-    def expand_zip_context(self, sources: list[Source], *, limit_per_zip: int = 12) -> list[Source]:
-        """검색된 문서와 같은 ZIP의 대표 PDF·첨부 청크를 검증 자료로 확장한다."""
+    def expand_zip_context(
+        self,
+        sources: list[Source],
+        *,
+        limit_per_zip: int | None = 12,
+        char_budget: int | None = None,
+    ) -> list[Source]:
+        """검색된 문서와 같은 ZIP의 대표 PDF·첨부 청크를 검증 자료로 확장한다.
+
+        limit_per_zip=None이면 해당 ZIP의 전체 청크를 투입한다(루프 없는 전수 대조).
+        이때 char_budget(기본 FULL_ZIP_CHAR_BUDGET)으로 총량을 제한해 ZIP이 커져도
+        비용과 컨텍스트가 폭주하지 않게 한다. 정렬 순서상 결재문서가 첨부보다 먼저
+        채워지므로 예산이 모자라면 덜 중요한 첨부부터 잘린다.
+        """
         if not sources:
             return []
+        if limit_per_zip is None and char_budget is None:
+            char_budget = FULL_ZIP_CHAR_BUDGET
         try:
             docs = self._fetch_source_documents([s.document_id for s in sources])
             zip_ids = sorted({str(row.get("zip_id")) for row in docs.values() if row.get("zip_id")})
             if not zip_ids:
                 return sources
-            rows = self._fetch_zip_chunk_sources(zip_ids, limit_per_zip=limit_per_zip)
+            rows = self._fetch_zip_chunk_sources(
+                zip_ids, limit_per_zip=limit_per_zip, char_budget=char_budget)
             expanded = self._with_representative_citations(rows)
         except Exception:
             return sources
@@ -157,7 +177,13 @@ class Retriever:
             representatives.setdefault(zip_id, fallback)
         return representatives
 
-    def _fetch_zip_chunk_sources(self, zip_ids: list[str], *, limit_per_zip: int) -> list[Source]:
+    def _fetch_zip_chunk_sources(
+        self,
+        zip_ids: list[str],
+        *,
+        limit_per_zip: int | None,
+        char_budget: int | None = None,
+    ) -> list[Source]:
         res = (
             self.client.table("documents")
             .select("id,zip_id,filename,doc_no,doc_date,dept,doc_chunks(chunk_index,content)")
@@ -167,25 +193,30 @@ class Retriever:
         )
         sources: list[Source] = []
         per_zip: dict[str, int] = {}
+        total_chars = 0
         for row in sorted(res.data or [], key=_zip_context_sort_key):
             zip_id = str(row.get("zip_id"))
             count = per_zip.get(zip_id, 0)
-            if count >= limit_per_zip:
+            if limit_per_zip is not None and count >= limit_per_zip:
                 continue
             chunks = row.get("doc_chunks") or []
             for chunk in sorted(chunks, key=lambda c: int(c.get("chunk_index") or 0)):
-                if count >= limit_per_zip:
+                if limit_per_zip is not None and count >= limit_per_zip:
                     break
+                content = chunk.get("content") or ""
+                if char_budget is not None and sources and total_chars + len(content) > char_budget:
+                    return sources
                 sources.append(Source(
                     document_id=str(row["id"]),
                     chunk_index=int(chunk.get("chunk_index") or 0),
-                    content=chunk.get("content") or "",
+                    content=content,
                     score=0.0,
                     filename=row.get("filename"),
                     doc_no=row.get("doc_no"),
                     doc_date=str(row["doc_date"]) if row.get("doc_date") else None,
                     dept=row.get("dept"),
                 ))
+                total_chars += len(content)
                 count += 1
             per_zip[zip_id] = count
         return sources

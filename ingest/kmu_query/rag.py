@@ -14,6 +14,10 @@ from .verification import VerificationMemo, build_verification_memo
 
 REFUSAL = "제공된 자료에서 관련 내용을 찾지 못했습니다. 질문을 더 구체화하거나 권한 범위를 확인해 주세요."
 
+# Gemini 2.5는 thinking 토큰이 max_output_tokens를 먼저 소비하므로
+# 1024로 두면 본문이 비어서 올 수 있다. 여유를 두어 4096으로 설정.
+GEMINI_MAX_OUTPUT_TOKENS = 4096
+
 SYSTEM_PROMPT = (
     "당신은 대학 행정 문서 위키의 비서입니다. 반드시 아래 '자료'에 있는 내용만 근거로 "
     "한국어로 간결히 답하세요. 각 근거 문장 끝에 [번호] 형식으로 출처를 표기하세요. "
@@ -180,7 +184,7 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_PROMPT,
-                    max_output_tokens=1024,
+                    max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
                 ),
             )
             for chunk in stream:

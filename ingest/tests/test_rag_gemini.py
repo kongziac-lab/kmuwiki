@@ -77,7 +77,7 @@ class TestGeminiProvider(unittest.TestCase):
         self.assertEqual(_Models.kw["model"], "gemini-2.5-pro")
         self.assertIn("자료:", _Models.kw["contents"])
         self.assertEqual(_GenerateContentConfig.kw["system_instruction"], rag.SYSTEM_PROMPT)
-        self.assertEqual(_GenerateContentConfig.kw["max_output_tokens"], 1024)
+        self.assertEqual(_GenerateContentConfig.kw["max_output_tokens"], rag.GEMINI_MAX_OUTPUT_TOKENS)
         self.assertTrue(_Client.closed)
 
     def test_streams_with_vertex_region_when_configured(self):
