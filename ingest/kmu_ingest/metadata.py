@@ -28,6 +28,62 @@ RE_SIHAENG_DATE = re.compile(r"시행[^()]*\(\s*(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,
 RE_ANYDATE = re.compile(r"(20\d{2})[.\-]\s?(0?[1-9]|1[0-2])[.\-]\s?(0?[1-9]|[12]\d|3[01])")
 # 부서-번호(줄바꿈 분리 가능). 단어 좌표 복원 후 적용.
 _DOCNO = re.compile(r"([가-힣][가-힣A-Za-z0-9 ]*?(?:팀|처|과|부|원|실|단|관|위원회))\s*-\s*(\d+)")
+RE_KR_TITLE = re.compile(r"(?:제\s*목|건\s*명|문서\s*제목)\s*[:：]?\s*(.+)")
+RE_ATTACHMENT_LINE = re.compile(r"^\s*(?:붙임|첨부)\s*\d*\.?\s+(.+)$", re.MULTILINE)
+RE_RECEIVER = re.compile(r"^\s*수\s*신\s*[:：]?\s*(.+)$", re.MULTILINE)
+
+
+def _clean_line(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = re.sub(r"\s+", " ", value).strip(" .\t")
+    return value[:240] or None
+
+
+def _attachment_names(text: str | None) -> list[str]:
+    if not text:
+        return []
+    names: list[str] = []
+    for match in RE_ATTACHMENT_LINE.finditer(text):
+        name = _clean_line(match.group(1))
+        if name and name not in names:
+            names.append(name)
+    return names[:20]
+
+
+def _document_kind(filename: str, text: str | None) -> str:
+    base = filename.replace("\\", "/").split("/")[-1].lower()
+    haystack = f"{base}\n{text or ''}"
+    if _is_attachment(filename):
+        return "attachment"
+    if "결과" in haystack and "보고" in haystack:
+        return "result_report"
+    if "계획" in haystack:
+        return "plan"
+    if "협조" in haystack:
+        return "cooperation"
+    if "기안" in haystack or "시행" in haystack:
+        return "approval"
+    if base.endswith((".xls", ".xlsx", ".csv")):
+        return "table"
+    return "document"
+
+
+def _enrich_fields(fields: dict, filename: str, text: str | None) -> dict:
+    enriched = dict(fields)
+    title = enriched.get("title")
+    if not title and text:
+        match = RE_KR_TITLE.search(text)
+        title = _clean_line(match.group(1)) if match else None
+    enriched["title"] = _clean_line(title) or _clean_line(filename.rsplit(".", 1)[0])
+    enriched["attachment_names"] = _attachment_names(text)
+    enriched["document_kind"] = _document_kind(filename, text)
+    if text:
+        match = RE_RECEIVER.search(text)
+        receiver = _clean_line(match.group(1)) if match else None
+        if receiver:
+            enriched["receiver"] = receiver
+    return enriched
 
 
 def _docno_from_words(words: list[dict]) -> tuple[str, str] | None:
@@ -83,7 +139,7 @@ def extract_pdf_fields(pdf_bytes: bytes) -> dict:
             fields["doc_date"] = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError:
             pass
-    return fields
+    return _enrich_fields(fields, "document.pdf", text)
 
 
 def extract_doc_fields(text: str | None) -> dict:
@@ -104,7 +160,7 @@ def extract_doc_fields(text: str | None) -> dict:
             fields["doc_date"] = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError:
             pass
-    return fields
+    return _enrich_fields(fields, "", text)
 
 
 _ATTACH = re.compile(r"^\[?\s*붙임")
@@ -127,7 +183,11 @@ def resolve_file_fields(filename: str, data: bytes, text: str | None,
     - 어느 것도 없으면 상속.
     """
     if _is_attachment(filename):
-        return zip_fields or {}
+        inherited = dict(zip_fields or {})
+        inherited.setdefault("title", _clean_line(filename.rsplit(".", 1)[0]))
+        inherited.setdefault("attachment_names", [])
+        inherited["document_kind"] = "attachment"
+        return inherited
 
     own: dict | None = None
     if data and filename.lower().endswith(".pdf"):
@@ -141,8 +201,10 @@ def resolve_file_fields(filename: str, data: bytes, text: str | None,
             own = t
 
     if own and own.get("doc_no"):
-        return own
-    return zip_fields or {}
+        return _enrich_fields(own, filename, text)
+    inherited = dict(zip_fields or {})
+    enriched = _enrich_fields(inherited, filename, text)
+    return enriched
 
 
 def build_file_meta(filename: str, path_in_zip: str, mime: str | None,
@@ -158,6 +220,9 @@ def build_file_meta(filename: str, path_in_zip: str, mime: str | None,
         task_category=zf.get("task_category"),
         classification_confidence=float(zf.get("classification_confidence") or 0.0),
         review_required=bool(zf.get("review_required", True)),
+        title=zf.get("title"),
+        attachment_names=list(zf.get("attachment_names") or []),
+        document_kind=zf.get("document_kind"),
         doc_no=zf.get("doc_no"),
         doc_date=zf.get("doc_date"),
     )

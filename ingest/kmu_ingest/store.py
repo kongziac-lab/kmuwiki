@@ -92,6 +92,9 @@ class SupabaseStore:
             "task_category": meta.task_category,
             "classification_confidence": meta.classification_confidence,
             "review_required": meta.review_required,
+            "title": meta.title,
+            "attachment_names": meta.attachment_names,
+            "document_kind": meta.document_kind,
             "doc_no": meta.doc_no, "author": meta.author, "version": meta.version,
             "doc_date": meta.doc_date.isoformat() if meta.doc_date else None,
             "error": error,
@@ -111,6 +114,7 @@ class SupabaseStore:
             "document_id": document_id, "chunk_index": ch.chunk_index,
             "content": ch.content, "embedding": emb,
             "token_count": ch.token_count, "embed_model": model, "embed_version": version,
+            "section_type": ch.section_type,
         } for ch, emb in zip(chunks, embeddings)]
         if rows:
             self.c.table("doc_chunks").insert(rows).execute()

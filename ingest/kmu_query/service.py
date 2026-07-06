@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import time
 from urllib.parse import quote
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -27,12 +28,15 @@ from . import reports
 from . import docx_export
 from . import hwpx_export
 from .retriever import Retriever
+from .rerank import CohereReranker, RerankResult, rerank_sources
 from .source_quality import refine_sources
 from .verification import focus_sources, needs_full_zip_context
 from .audit import log_access
 
 settings = load_settings()
 _embedder = make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version)
+_reranker = None
+_reranker_checked = False
 
 app = FastAPI(title="KMU Wiki Search/RAG")
 app.add_middleware(
@@ -59,6 +63,20 @@ def _client_and_retriever(authorization: str | None):
     return client, Retriever(client, _embedder)
 
 
+def _get_reranker():
+    global _reranker, _reranker_checked
+    if _reranker_checked:
+        return _reranker
+    _reranker_checked = True
+    if settings.rerank_provider != "cohere" or not settings.cohere_api_key:
+        return None
+    try:
+        _reranker = CohereReranker(settings.cohere_api_key, settings.rerank_model)
+    except Exception:
+        _reranker = None
+    return _reranker
+
+
 def _bounded_k(body: dict, *, default: int | None = None) -> int:
     fallback = default or settings.api_default_k
     try:
@@ -77,6 +95,17 @@ def _target_year(body: dict) -> int | None:
     return year if 2000 <= year <= 2100 else None
 
 
+def _apply_rerank(query: str, sources, *, top_n: int) -> RerankResult:
+    return rerank_sources(
+        query,
+        sources,
+        reranker=_get_reranker(),
+        top_n=top_n,
+        max_candidates=settings.rerank_max_candidates,
+        provider=settings.rerank_provider,
+    )
+
+
 def require_api_secret(header_secret: str | None, current_settings=settings) -> None:
     """공개 API 직접 호출 차단. 로컬 개발 편의를 위해 미설정이면 비활성."""
     expected = current_settings.api_shared_secret
@@ -92,15 +121,21 @@ async def search(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
+    started = time.perf_counter()
     require_api_secret(api_secret)
     body = await req.json()
     client, retriever = _client_and_retriever(authorization)
     query = body.get("query", "")
     k = _bounded_k(body)
     sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
-    sources = refine_sources(query, sources, limit=k)
-    sources = focus_sources(query, sources, limit=k)
-    log_access(client, action="search", query=query, sources=sources)
+    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = focus_sources(query, reranked.sources, limit=k)
+    log_access(
+        client, action="search", query=query, sources=sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
     return JSONResponse({"sources": [s.__dict__ for s in sources]})
 
 
@@ -110,17 +145,24 @@ async def chat(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
+    started = time.perf_counter()
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body)
     sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
-    sources = refine_sources(query, sources, limit=k)
+    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+    reranked = _apply_rerank(query, sources, top_n=k)
     # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
     zip_limit = None if needs_full_zip_context(query) else 12
-    answer_sources = retriever.expand_zip_context(focus_sources(query, sources), limit_per_zip=zip_limit)
-    log_access(client, action="chat", query=query, sources=sources)
+    focused_sources = focus_sources(query, reranked.sources, limit=k)
+    answer_sources = retriever.expand_zip_context(focused_sources, limit_per_zip=zip_limit)
+    log_access(
+        client, action="chat", query=query, sources=focused_sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
 
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -150,13 +192,20 @@ async def build_insights(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
+    started = time.perf_counter()
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
-    sources = retriever.retrieve(
-        query, _bounded_k(body, default=12), body.get("dept"), _target_year(body))
-    log_access(client, action="insights", query=query, sources=sources)
+    k = _bounded_k(body, default=12)
+    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = reranked.sources
+    log_access(
+        client, action="insights", query=query, sources=sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
     report_draft = insights.draft_report(query, sources)
     return JSONResponse({
         "work_items": insights.group_work_items(sources),
@@ -174,15 +223,22 @@ async def hermes_report(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
+    started = time.perf_counter()
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
     known = set(body.get("known_document_ids") or [])
     target_year = body.get("target_year")
     client, retriever = _client_and_retriever(authorization)
-    sources = retriever.retrieve(
-        query, _bounded_k(body, default=12), body.get("dept"), _target_year(body))
-    log_access(client, action="hermes", query=query, sources=sources)
+    k = _bounded_k(body, default=12)
+    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = reranked.sources
+    log_access(
+        client, action="hermes", query=query, sources=sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
     drafts = []
     if isinstance(target_year, int):
         drafts = hermes.draft_next_year_documents(sources, target_year, limit=3)
@@ -199,17 +255,25 @@ async def wiki_report(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
+    started = time.perf_counter()
     require_api_secret(api_secret)
     body = await req.json()
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
+    k = _bounded_k(body, default=12)
     sources = retriever.retrieve(
         query,
-        _bounded_k(body, default=12),
+        k,
         body.get("dept"),
         _target_year(body),
     )
-    log_access(client, action="reports", query=query, sources=sources)
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = reranked.sources
+    log_access(
+        client, action="reports", query=query, sources=sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
     target_year = body.get("target_year")
     if not isinstance(target_year, int):
         target_year = None

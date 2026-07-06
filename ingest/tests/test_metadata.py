@@ -45,6 +45,21 @@ class TestMetadata(unittest.TestCase):
         f = extract_doc_fields("")
         self.assertEqual(f, {"title": None, "dept": None, "doc_no": None, "doc_date": None})
 
+    def test_extracts_title_attachments_and_kind(self):
+        text = """수 신: 총장
+제 목: 2026년 공자아카데미 운영 결과 보고
+1. 운영 결과를 보고함.
+붙임 1. 이사회 자료.hwp
+붙임 2. 수지계산서.xlsx
+시행 국제교류팀-680 ( 2026.06.26. )
+"""
+        f = resolve_file_fields("공자아카데미 운영 결과 보고.hwp", b"", text, None)
+
+        self.assertEqual(f["title"], "2026년 공자아카데미 운영 결과 보고")
+        self.assertEqual(f["document_kind"], "result_report")
+        self.assertIn("이사회 자료.hwp", f["attachment_names"][0])
+        self.assertEqual(f["receiver"], "총장")
+
     def test_build_file_meta_inherits_zip_fields(self):
         zf = {"dept": "국제교류팀", "doc_no": "국제교류팀-123",
               "doc_date": date(2026, 3, 18), "title": "제목"}

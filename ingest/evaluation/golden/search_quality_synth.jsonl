@@ -1,0 +1,5 @@
+{"id":"doc-no","query":"국제교류팀-680 문서 찾아줘","dept":"국제교류팀","year":2026,"intent":"doc_no","relevant_ids":["doc-680"],"retrieved_ids":["doc-680","doc-224","doc-34"]}
+{"id":"attachment","query":"2025회계연도 공자아카데미 결산자료 붙임 목록","dept":"국제교류팀","year":2026,"intent":"attachment","relevant_ids":["doc-34-attach-list","doc-34-settlement"],"retrieved_ids":["doc-34-attach-list","doc-34-pdf","doc-34-settlement"]}
+{"id":"semantic","query":"작년에 했던 중국어 문화탐방 유사 사업","dept":"국제교류팀","year":2026,"intent":"semantic","relevant_ids":["doc-224"],"retrieved_ids":["doc-224","doc-680","doc-34"]}
+{"id":"table","query":"공자아카데미 예산상세산출내역서","dept":"국제교류팀","year":2026,"intent":"table","relevant_ids":["doc-407-budget"],"retrieved_ids":["doc-407-budget","doc-34-settlement","doc-224"]}
+{"id":"date","query":"2026년 3월 6일 공자아카데미 결산 관련 문서","dept":"국제교류팀","year":2026,"intent":"date","relevant_ids":["doc-34"],"retrieved_ids":["doc-34","doc-224","doc-680"]}

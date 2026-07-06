@@ -35,7 +35,9 @@ test("admin summary API exposes storage health monitoring", () => {
 
   assert.match(route, /admin_dashboard_summary/);
   assert.match(route, /admin_storage_health/);
+  assert.match(route, /admin_search_monitoring_summary/);
   assert.match(route, /storage_health/);
+  assert.match(route, /search_monitoring/);
 });
 
 test("local ingest is allowed only from local admin mode", () => {

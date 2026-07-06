@@ -37,6 +37,9 @@ class FileMeta:
     task_category: str | None = None
     classification_confidence: float = 0.0
     review_required: bool = True
+    title: str | None = None
+    attachment_names: list[str] = field(default_factory=list)
+    document_kind: str | None = None
     doc_no: str | None = None
     doc_date: date | None = None
     author: str | None = None
@@ -48,6 +51,7 @@ class Chunk:
     chunk_index: int
     content: str            # 반드시 마스킹된 텍스트
     token_count: int | None = None
+    section_type: str | None = None
 
 
 @dataclass

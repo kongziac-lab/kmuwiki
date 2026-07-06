@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import lockdetect
-from .chunking import chunk_text
+from .chunking import chunk_prefix, chunk_text
 from .classification import classify_document
 from .cleaning import strip_boilerplate
 from .config import Settings
@@ -128,8 +128,16 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
 
     # 7) 검색용 본문 정리 → 청킹 → 임베딩 → 적재 (마스킹된 본문만)
     searchable_text = strip_boilerplate(masked.text)
+    prefix = chunk_prefix(
+        title=meta.title,
+        dept=meta.dept,
+        doc_no=meta.doc_no,
+        doc_date=meta.doc_date,
+        document_kind=meta.document_kind,
+        attachment_names=meta.attachment_names,
+    )
     chunks = chunk_text(searchable_text, deps.settings.chunk_chars,
-                        deps.settings.chunk_overlap)
+                        deps.settings.chunk_overlap, prefix=prefix or None)
     if len(chunks) > deps.settings.max_chunks_per_doc:
         chunks = chunks[:deps.settings.max_chunks_per_doc]
     if not chunks:

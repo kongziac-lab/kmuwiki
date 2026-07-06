@@ -12,6 +12,47 @@ import re
 from .models import Chunk
 
 _PARA = re.compile(r"\n\s*\n")
+_SECTION_BOUNDARY = re.compile(r"(?m)^(?=\s*(?:\d+\.|[가-하]\.|[0-9]+\)|붙임|첨부|표\s*\d*|□|○))")
+
+
+def chunk_prefix(*, title: str | None = None, dept: str | None = None,
+                 doc_no: str | None = None, doc_date=None,
+                 document_kind: str | None = None,
+                 attachment_names: list[str] | None = None) -> str:
+    bits = []
+    if title:
+        bits.append(f"제목: {title}")
+    if dept:
+        bits.append(f"부서: {dept}")
+    if doc_no:
+        bits.append(f"문서번호: {doc_no}")
+    if doc_date:
+        bits.append(f"시행일: {doc_date}")
+    if document_kind:
+        bits.append(f"문서유형: {document_kind}")
+    if attachment_names:
+        bits.append("붙임: " + "; ".join(attachment_names[:5]))
+    return " | ".join(bits)
+
+
+def infer_section_type(text: str) -> str:
+    sample = text.strip()[:300]
+    if re.search(r"^(제목|문서번호|시행일|수신|참조|제\s*목)", sample, re.MULTILINE):
+        return "header"
+    if re.search(r"^(붙임|첨부)\b", sample, re.MULTILINE):
+        return "attachment"
+    if re.search(r"(예산|금액|산출|계정|합계|수지계산|결산)", sample):
+        return "table"
+    return "body"
+
+
+def _semantic_units(text: str) -> list[str]:
+    raw_paras = [p.strip() for p in _PARA.split(text) if p.strip()]
+    units: list[str] = []
+    for para in raw_paras:
+        parts = [p.strip() for p in _SECTION_BOUNDARY.split(para) if p.strip()]
+        units.extend(parts or [para])
+    return units
 
 
 def chunk_text(
@@ -30,7 +71,7 @@ def chunk_text(
     if not text:
         return []
 
-    paras = [p.strip() for p in _PARA.split(text) if p.strip()]
+    paras = _semantic_units(text)
     pieces: list[str] = []
     buf = ""
     for para in paras:
@@ -57,5 +98,10 @@ def chunk_text(
             if tail and not body.startswith(tail):
                 body = tail + "\n" + body
         content = f"{prefix}\n{body}" if prefix else body
-        chunks.append(Chunk(chunk_index=i, content=content, token_count=len(content)))
+        chunks.append(Chunk(
+            chunk_index=i,
+            content=content,
+            token_count=len(content),
+            section_type=infer_section_type(body),
+        ))
     return chunks

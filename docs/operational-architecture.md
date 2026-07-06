@@ -56,12 +56,29 @@ Vercel 웹 앱에는 Supabase service role key를 넣지 않습니다. 웹/RAG A
 python scripts/verify_operational_guardrails.py
 ```
 
+검색 품질 기준선을 점검합니다.
+
+```powershell
+python scripts/verify_search_quality.py
+```
+
 주요 단위 테스트를 실행합니다.
 
 ```powershell
 $env:PYTHONPATH='ingest'
 python -m unittest ingest.tests.test_operational_guardrails ingest.tests.test_pipeline ingest.tests.test_rag
 ```
+
+## 검색 품질 개선 루프
+
+현재 검색 개선 순서는 다음을 기준으로 합니다.
+
+1. Parser/metadata: 제목, 문서번호, 시행일, 부서, 붙임, 문서유형을 추출합니다.
+2. Chunking: 제목/문서번호/날짜/붙임 prefix를 각 청크에 붙이고 `section_type`을 기록합니다.
+3. Hybrid Search: 부서/연도 필터를 먼저 적용합니다.
+4. Cohere Rerank: 후보를 재정렬하고 실패 시 hybrid 결과로 fallback합니다.
+5. Monitoring: `access_log`에 latency, result count, rerank 적용 여부를 기록합니다.
+6. Quality Report: `evaluation/golden/search_quality_synth.jsonl` 기준 `Recall@5`, `Recall@10`, `MRR`을 추적합니다.
 
 웹 빌드를 실행합니다.
 

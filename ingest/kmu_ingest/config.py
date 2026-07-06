@@ -79,6 +79,9 @@ class Settings:
     api_max_k: int = int(os.environ.get("KMU_API_MAX_K", "20"))
     api_default_k: int = int(os.environ.get("KMU_API_DEFAULT_K", "8"))
     audit_retention_days: int = int(os.environ.get("KMU_AUDIT_RETENTION_DAYS", "180"))
+    rerank_provider: str = os.environ.get("KMU_RERANK_PROVIDER", "cohere")
+    rerank_model: str = os.environ.get("KMU_RERANK_MODEL", "rerank-v3.5")
+    rerank_max_candidates: int = int(os.environ.get("KMU_RERANK_MAX_CANDIDATES", "50"))
 
     def resolve_llm(self) -> tuple[str, str]:
         """(provider, model). 명시(KMU_LLM_PROVIDER) 우선. 자동은 anthropic 키 있으면 anthropic, 없으면 cohere.

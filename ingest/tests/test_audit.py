@@ -31,9 +31,11 @@ class TestAuditLogging(unittest.TestCase):
 
         log_access(client, action="search", query="면접", sources=sources)
 
-        self.assertEqual(client.calls[0][0], "log_access")
+        self.assertEqual(client.calls[0][0], "log_search_event")
         self.assertEqual(client.calls[0][1]["document_ids"], ["d1", "d2"])
         self.assertEqual(client.calls[0][1]["action_text"], "search")
+        self.assertEqual(client.calls[0][1]["result_count"], 2)
+        self.assertEqual(client.calls[1][0], "log_access")
 
 
 if __name__ == "__main__":

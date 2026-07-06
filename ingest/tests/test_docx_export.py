@@ -2,7 +2,12 @@ import io
 import unittest
 import zipfile
 
-from kmu_query.docx_export import build_approval_docx, safe_docx_filename
+try:
+    from kmu_query.docx_export import build_approval_docx, safe_docx_filename
+except ModuleNotFoundError as exc:
+    if exc.name == "docx":
+        raise unittest.SkipTest("python-docx is not installed in this Python environment")
+    raise
 
 
 class TestDocxExport(unittest.TestCase):
