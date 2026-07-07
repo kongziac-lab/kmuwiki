@@ -1,0 +1,2 @@
+# 셸 스크립트는 항상 LF 유지 — Windows 체크아웃에서도 CRLF 방지(리눅스/NAS 실행 보호).
+*.sh text eol=lf
