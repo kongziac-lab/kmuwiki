@@ -1,0 +1,24 @@
+# 비밀값·로컬 전용·불필요 파일은 이미지에 넣지 않는다.
+.env
+.env.local
+.env.*.local
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# 로컬 원본/데이터(원본 ZIP은 이미지가 아니라 read-only 마운트로 주입)
+zips/
+*.zip
+
+# 워커 이미지에 불필요
+tests/
+evaluation/
+kmu_verify/
+kmu_query/
+main.py
+requirements-api.txt
+README.md
+Dockerfile
+.dockerignore
+docker-compose.yml

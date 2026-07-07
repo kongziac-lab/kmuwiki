@@ -1,0 +1,52 @@
+# KMU Wiki 인제스트 워커 — Synology DS920+ Container Manager 용.
+#
+# 사용:
+#   1) .env.worker.example → .env.worker 로 복사하고 키 2개만 채운다.
+#   2) 원본 ZIP 공유폴더 경로를 아래 volumes 의 호스트 경로로 지정한다.
+#   3) 1회성 배치 실행:   docker compose run --rm worker run
+#      백필:              docker compose run --rm worker backfill
+#   4) NAS 작업 스케줄러에 야간 cron 으로 (3)을 등록.
+#
+# 보안 원칙(docs/nas-hub-architecture.md):
+#   - 원본은 read-only(:ro) 마운트 — 워커는 원본을 읽기만 한다.
+#   - 컨테이너 파일시스템 read_only + no-new-privileges + cap_drop=ALL.
+#   - 비밀값은 .env.worker 로만 주입(이미지/깃 미포함). 워커는 키 2개만 필요:
+#       SUPABASE_SERVICE_ROLE_KEY, COHERE_API_KEY
+#     (Anthropic/Nous/Gemini/anon 키는 답변 생성용 → 여기에 넣지 않는다.)
+
+services:
+  worker:
+    build: .
+    image: kmu-ingest-worker
+    env_file:
+      - .env.worker
+    environment:
+      KMU_ZIP_DIR: /data/zips
+      KMU_OCR_BACKEND: none        # OCR은 GPU 박스로 유예(pending_ocr)
+      KMU_ENABLE_NER: "0"          # torch 미포함 이미지 — 성명 NER 비활성
+      KMU_EMBED_PROVIDER: cohere   # 기본값 fake 방지: 실제 임베딩 강제
+      KMU_EMBED_MODEL: embed-multilingual-v3.0   # Cohere 실제 모델(1024d). 기본 fake-deterministic 방지
+      KMU_EMBED_VERSION: v3        # 기존 Supabase 데이터와 동일 모델 핀
+    volumes:
+      # 원본 ZIP: 공유폴더 jdh 안의 kmuwiki 하위폴더(연도별 2025/2026 하위). 반드시 :ro 유지.
+      # 리눅스는 대소문자 구분 — 실제 폴더명은 소문자 kmuwiki.
+      # Windows Y:\Kmuwiki  ==  NAS /volume1/jdh/kmuwiki
+      - /volume1/jdh/kmuwiki:/data/zips:ro
+    # ---- 하드닝 ----
+    # Synology 공유폴더 ACL(drwxrwxrwx+) 때문에 비-root(uid 10001)는 원본을 못 읽음.
+    # root로 실행해 ACL 우회. 마운트가 :ro + cap_drop/no-new-privileges 라 보호는 유지.
+    user: "0:0"                    # root (Synology ACL 회피)
+    read_only: true                # 컨테이너 루트 FS 읽기 전용
+    tmpfs:
+      - /tmp                       # 파싱 임시 파일용 쓰기 가능 영역
+    # 주의: root(user 0:0)로 실행하므로 cap_drop:ALL 을 쓰면 DAC_OVERRIDE 가 사라져
+    #       앱 코드(worker 소유)·ACL 원본을 못 읽는다. 그래서 cap_drop 은 제거.
+    #       실질 보호는 :ro 마운트 + read_only 루트FS + no-new-privileges 로 유지.
+    security_opt:
+      - no-new-privileges:true
+    # 배치 잡이므로 자동 재시작하지 않는다(스케줄러가 트리거).
+    restart: "no"
+    # 리소스 상한(4GB RAM NAS 보호). 8GB 증설 시 상향 가능.
+    # 주의: Synology 커널은 CPU CFS 쿼터 미지원 → cpus 설정 불가(제거함).
+    # CPU 제한이 필요하면 DSM Container Manager GUI에서 조정.
+    mem_limit: 2g

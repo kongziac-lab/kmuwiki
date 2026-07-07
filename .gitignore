@@ -4,6 +4,8 @@ ingest/zips/
 .env
 .env.local
 .env*.local
+.env.worker
+ingest/.env.worker
 
 # Python
 __pycache__/

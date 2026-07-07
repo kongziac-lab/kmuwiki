@@ -43,5 +43,6 @@
 ## 배포
 - **루트** → Vercel Services. `web/`은 Next.js 웹, `ingest/main.py`는 `/rag` FastAPI 검색·RAG 서비스.
 - **ingest/** 워커 → 학교 내부/로컬에서 실행. 원본 ZIP 파싱·마스킹·임베딩 적재는 Vercel에서 수행하지 않는다.
+  - NAS(Synology DS920+) 상시 가동 허브로 컨테이너화하는 구성: [docs/nas-hub-architecture.md](docs/nas-hub-architecture.md) (`ingest/Dockerfile`·`docker-compose.yml`).
 - 원본 ZIP 파일명/하위폴더는 `zip_archives.source_path`로 추적한다. 파일 보관 구조가 바뀌어도 검색 기준은 DB 메타데이터다.
 - 암호가 있는 파일 내부 복호는 보안된 내부 로컬 서버 구축 전까지 의도적으로 유예한다. 그 전까지 `pending_password`는 수동 큐/격리 상태로 유지한다.
