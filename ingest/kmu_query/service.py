@@ -39,8 +39,10 @@ _reranker = None
 _reranker_checked = False
 
 app = FastAPI(title="KMU Wiki Search/RAG")
+# CORS 허용 출처: KMU_ALLOWED_ORIGINS(콤마 구분)로 제한. 미설정 시 "*"(개발) 폴백.
+_allowed_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()] or ["*"]
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware, allow_origins=_allowed_origins, allow_methods=["*"], allow_headers=["*"],
 )
 
 

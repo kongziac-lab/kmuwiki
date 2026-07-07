@@ -76,6 +76,9 @@ class Settings:
     cohere_chat_model: str = os.environ.get("KMU_COHERE_CHAT_MODEL", "command-r-plus-08-2024")
     # 웹 프록시 ↔ Python API 사이의 공유 시크릿. 설정된 경우 /search, /chat은 이 헤더가 필요하다.
     api_shared_secret: str = os.environ.get("KMU_API_SHARED_SECRET", "")
+    # CORS 허용 출처(콤마 구분). 기본 "*"(개발 편의). 프로덕션은 실제 웹앱 도메인으로 좁힐 것.
+    #   예: KMU_ALLOWED_ORIGINS="https://kmuwiki.example.com,https://www.example.com"
+    allowed_origins: str = os.environ.get("KMU_ALLOWED_ORIGINS", "*")
     api_max_k: int = int(os.environ.get("KMU_API_MAX_K", "20"))
     api_default_k: int = int(os.environ.get("KMU_API_DEFAULT_K", "8"))
     audit_retention_days: int = int(os.environ.get("KMU_AUDIT_RETENTION_DAYS", "180"))
