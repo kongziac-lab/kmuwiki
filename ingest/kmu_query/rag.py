@@ -110,6 +110,29 @@ def _default_client():
     return anthropic.Anthropic()
 
 
+# 스튜디오 요약(NotebookLM식). 답변과 달리 여러 문서를 가로질러 개요·핵심·쟁점을
+# 정리하되, 여전히 '제공된 자료'에만 근거하고 각 항목에 [번호] 인용을 단다.
+SUMMARY_SYSTEM_PROMPT = (
+    "당신은 대학 행정 문서 위키의 분석 비서입니다. 아래 '자료'에 있는 여러 문서를 "
+    "가로질러 한국어로 구조화된 개요를 작성하세요. 반드시 다음 마크다운 형식을 지키세요:\n"
+    "## 한눈에 보기\n(2~3문장 개요)\n"
+    "## 핵심 내용\n- 항목마다 문장 끝에 [번호] 인용\n"
+    "## 주요 일정·수치\n- 자료에 날짜/수치가 있을 때만. 없으면 '해당 없음'\n"
+    "## 확인이 필요한 점\n- 자료만으로 단정하기 어려운 점\n\n"
+    "규칙: 자료에 없는 내용은 추측하지 말 것. 검증 메모의 확정 근거만 사실로 단정하고 "
+    "주의/불확실 항목은 단정하지 말 것. 문서일자·결재일과 본문 행사일시를 구분할 것. "
+    "마스킹 토큰([주민등록번호] 등)은 그대로 둘 것."
+)
+
+
+def build_summary_prompt(query: str, sources: list[Source], memo: VerificationMemo | None = None) -> str:
+    memo = memo or build_verification_memo(query, sources)
+    return (
+        f"검증 메모:\n{memo.to_prompt_block()}\n\n자료:\n{build_context(sources)}\n\n"
+        f"요청: '{query}' 와 관련된 위 자료들을 지정된 형식으로 요약하세요."
+    )
+
+
 def stream_answer(query: str, sources: list[Source], *, provider: str, model: str,
                   anthropic_key: str | None = None, cohere_key: str | None = None,
                   nous_key: str | None = None, nous_base_url: str | None = None,
@@ -129,12 +152,71 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         yield memo.deterministic_answer
         return
     prompt = build_user_prompt(query, sources, memo)
+    yield from _stream_provider(
+        provider=provider, model=model, system=SYSTEM_PROMPT, prompt=prompt, max_tokens=1024,
+        anthropic_key=anthropic_key, cohere_key=cohere_key,
+        nous_key=nous_key, nous_base_url=nous_base_url,
+        gemini_key=gemini_key, gemini_use_vertex=gemini_use_vertex,
+        gemini_project=gemini_project, gemini_location=gemini_location,
+    )
 
+
+def stream_summary(query: str, sources: list[Source], *, provider: str, model: str,
+                   anthropic_key: str | None = None, cohere_key: str | None = None,
+                   nous_key: str | None = None, nous_base_url: str | None = None,
+                   gemini_key: str | None = None, gemini_use_vertex: bool = False,
+                   gemini_project: str | None = None, gemini_location: str | None = None):
+    """NotebookLM식 소스 묶음 요약 스트리밍. stream_answer 와 같은 제공자·마스킹 경계를 쓴다.
+
+    답변(단문) 대신 구조화 개요를 내므로 max_tokens 여유를 둔다. 출처 없으면 거절 1회.
+    """
+    if not sources:
+        yield REFUSAL
+        return
+    prompt = build_summary_prompt(query, sources)
+    yield from _stream_provider(
+        provider=provider, model=model, system=SUMMARY_SYSTEM_PROMPT, prompt=prompt, max_tokens=2048,
+        anthropic_key=anthropic_key, cohere_key=cohere_key,
+        nous_key=nous_key, nous_base_url=nous_base_url,
+        gemini_key=gemini_key, gemini_use_vertex=gemini_use_vertex,
+        gemini_project=gemini_project, gemini_location=gemini_location,
+    )
+
+
+def generate_text(*, provider: str, model: str, system: str, prompt: str, max_tokens: int = 1024,
+                  anthropic_key: str | None = None, cohere_key: str | None = None,
+                  nous_key: str | None = None, nous_base_url: str | None = None,
+                  gemini_key: str | None = None, gemini_use_vertex: bool = False,
+                  gemini_project: str | None = None, gemini_location: str | None = None) -> str:
+    """단발성(비스트리밍) 텍스트 생성. 스트리밍 스위치를 모아 문자열로 반환한다.
+
+    마인드맵 의미 그룹핑처럼 스트리밍이 필요 없는 짧은 보조 호출에 쓴다.
+    답변·요약과 같은 제공자 선택·마스킹 경계를 공유한다.
+    """
+    return "".join(_stream_provider(
+        provider=provider, model=model, system=system, prompt=prompt, max_tokens=max_tokens,
+        anthropic_key=anthropic_key, cohere_key=cohere_key,
+        nous_key=nous_key, nous_base_url=nous_base_url,
+        gemini_key=gemini_key, gemini_use_vertex=gemini_use_vertex,
+        gemini_project=gemini_project, gemini_location=gemini_location,
+    ))
+
+
+def _stream_provider(*, provider: str, model: str, system: str, prompt: str, max_tokens: int,
+                     anthropic_key: str | None = None, cohere_key: str | None = None,
+                     nous_key: str | None = None, nous_base_url: str | None = None,
+                     gemini_key: str | None = None, gemini_use_vertex: bool = False,
+                     gemini_project: str | None = None, gemini_location: str | None = None):
+    """제공자별 스트리밍 스위치(system+prompt 공통). 답변·요약이 공유한다.
+
+    Gemini 는 thinking 토큰이 max_output_tokens 를 먼저 소비하므로 항상 GEMINI_MAX_OUTPUT_TOKENS
+    이상을 보장한다(max_tokens 와 큰 값 채택).
+    """
     if provider == "anthropic":
         import anthropic
         client = anthropic.Anthropic(api_key=anthropic_key or None)
         with client.messages.stream(
-            model=model, max_tokens=1024, system=SYSTEM_PROMPT,
+            model=model, max_tokens=max_tokens, system=system,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
             yield from stream.text_stream
@@ -143,7 +225,7 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         import cohere
         client = cohere.ClientV2(cohere_key)
         for ev in client.chat_stream(model=model, messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ]):
             if ev.type == "content-delta":
@@ -154,8 +236,8 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         client = OpenAI(api_key=nous_key or None,
                         base_url=nous_base_url or "https://inference-api.nousresearch.com/v1")
         stream = client.chat.completions.create(
-            model=model, max_tokens=1024, stream=True,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT},
+            model=model, max_tokens=max_tokens, stream=True,
+            messages=[{"role": "system", "content": system},
                       {"role": "user", "content": prompt}],
         )
         for chunk in stream:
@@ -168,7 +250,6 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         from google import genai
         from google.genai import types
 
-        client_kwargs = {}
         if gemini_use_vertex:
             client_kwargs = {
                 "vertexai": True,
@@ -183,8 +264,8 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
                 model=model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+                    system_instruction=system,
+                    max_output_tokens=max(max_tokens, GEMINI_MAX_OUTPUT_TOKENS),
                 ),
             )
             for chunk in stream:

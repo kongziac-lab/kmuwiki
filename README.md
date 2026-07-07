@@ -11,6 +11,7 @@
 | `ingest/kmu_query/` | 검색·RAG 코어 — 하이브리드 검색·RLS·Claude 답변 (Phase 2) |
 | `ingest/kmu_query/insights.py` | 분류·흐름도·일정·보고서 초안 코어 (Phase 4) |
 | `ingest/kmu_query/hermes.py` | 반복업무 탐지·안전한 문서 초안·변경 보고 코어 (Phase 5) |
+| `ingest/kmu_query/studio.py` | NotebookLM식 산출물 — 마인드맵·슬라이드(Marp)·인포그래픽(SVG)·요약 (Phase 7). 문서: [docs/studio-notebooklm-quality.md](docs/studio-notebooklm-quality.md) |
 | `ingest/evaluation/` | 마스킹 품질 평가 하네스(골든셋·재현율 게이트) |
 | `supabase/migrations/` | DB 스키마·pgvector·RLS·하이브리드 검색 RPC |
 | `web/` | Next.js 검색·챗봇 UI (Vercel 배포 대상) |
@@ -28,8 +29,10 @@
 - 테스트: `cd ingest && python -m unittest discover -s tests`
 - Phase 6 정적 검증: `cd ingest && python -m kmu_verify.phase6 --out ../phase6-report.json`
 - 마스킹 평가: `cd ingest && python -m evaluation.evaluate`
+- 요약 품질 평가: `cd ingest && python -m evaluation.summary_quality` (CI 게이트: `python scripts/verify_summary_quality.py`)
 - 검색 API: `cd ingest && uvicorn kmu_query.service:app --port 8000`
-- 웹: `cd web && npm install && npm run dev`
+  - 스튜디오: `POST /studio`(마인드맵·슬라이드·인포그래픽·지표), `POST /studio/summary`(요약 SSE)
+- 웹: `cd web && npm install && npm run dev` — 스튜디오 화면은 `/studio`
 
 ## 관리자 모드
 - `/admin`은 Supabase 로그인 후 `access_roles.role='admin'`인 사용자만 접근한다.

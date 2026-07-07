@@ -23,6 +23,7 @@ from kmu_ingest.embedding import make_embedder
 
 from . import rag
 from . import insights
+from . import studio
 from . import hermes
 from . import reports
 from . import docx_export
@@ -217,6 +218,110 @@ async def build_insights(
         "report_draft": report_draft,
         "report_workflow": insights.build_report_workflow(query, report_draft),
     })
+
+
+@app.post("/studio")
+async def build_studio(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    """NotebookLM식 산출물(비-LLM): 마인드맵·슬라이드(Marp)·인포그래픽(SVG)·지표.
+
+    한 번의 검색으로 결정론적 산출물을 모두 반환한다. 요약(LLM)은 /studio/summary 로 분리.
+    """
+    started = time.perf_counter()
+    require_api_secret(api_secret)
+    body = await req.json()
+    query = body.get("query", "")
+    client, retriever = _client_and_retriever(authorization)
+    k = _bounded_k(body, default=12)
+    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = reranked.sources
+    log_access(
+        client, action="studio", query=query, sources=sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
+    # 마인드맵 그룹 라벨만 선택적으로 LLM 의미 그룹핑(노드는 결정론적). 기본 활성,
+    # semantic_mindmap=false 로 끌 수 있고 실패 시 규칙기반으로 자동 폴백한다.
+    groups = None
+    if body.get("semantic_mindmap", True):
+        groups = _semantic_groups(query, sources)
+    return JSONResponse({
+        "metrics": studio.studio_metrics(query, sources),
+        "mindmap_mermaid": studio.build_mindmap_mermaid(query, sources, groups=groups),
+        "mindmap_grouping": "semantic" if groups else "rule",
+        "slides_marp": studio.build_slides_marp(query, sources),
+        "infographic_svg": studio.build_infographic_svg(query, sources),
+    })
+
+
+def _semantic_groups(query: str, sources):
+    """마인드맵 의미 그룹핑(work_id → 라벨). 실패·미설정 시 None 반환(규칙기반 폴백)."""
+    provider, model = settings.resolve_llm()
+
+    def generate(system: str, prompt: str) -> str:
+        return rag.generate_text(
+            provider=provider, model=model, system=system, prompt=prompt, max_tokens=512,
+            anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
+            nous_key=settings.nous_api_key, nous_base_url=settings.nous_base_url,
+            gemini_key=settings.gemini_api_key,
+            gemini_use_vertex=settings.gemini_use_vertex,
+            gemini_project=settings.gemini_project,
+            gemini_location=settings.gemini_location,
+        )
+
+    try:
+        return studio.cluster_work_items(query, sources, generate)
+    except Exception:
+        return None
+
+
+@app.post("/studio/summary")
+async def studio_summary(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    """NotebookLM식 소스 묶음 요약(SSE). /chat 과 같은 마스킹·제공자 선택을 재사용한다."""
+    started = time.perf_counter()
+    require_api_secret(api_secret)
+    body = await req.json()
+    query = body.get("query", "")
+    client, retriever = _client_and_retriever(authorization)
+    k = _bounded_k(body, default=12)
+    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
+    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+    reranked = _apply_rerank(query, sources, top_n=k)
+    answer_sources = focus_sources(query, reranked.sources, limit=k)
+    log_access(
+        client, action="studio_summary", query=query, sources=answer_sources,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+    )
+
+    def sse(event: str, data) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    provider, model = settings.resolve_llm()
+
+    def gen():
+        yield sse("citations", rag.citations(answer_sources))
+        for delta in rag.stream_summary(
+            query, answer_sources, provider=provider, model=model,
+            anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
+            nous_key=settings.nous_api_key, nous_base_url=settings.nous_base_url,
+            gemini_key=settings.gemini_api_key,
+            gemini_use_vertex=settings.gemini_use_vertex,
+            gemini_project=settings.gemini_project,
+            gemini_location=settings.gemini_location,
+        ):
+            yield sse("token", delta)
+        yield sse("done", {})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/hermes")
