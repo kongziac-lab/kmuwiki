@@ -64,6 +64,12 @@ def safe_hwpx_filename(title: str) -> str:
     return f"{filename}.hwpx"
 
 
+# 업로드 HWPX 템플릿 방어 한도(zip 폭탄·과대 입력 차단). 실제 템플릿은 수 MB 이하.
+_MAX_TEMPLATE_BYTES = 20 * 1024 * 1024        # 압축(입력) 상한 20MB
+_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024   # 전체 해제 상한 100MB
+_MAX_ENTRIES = 2000                            # zip 항목 수 상한
+
+
 def fill_template_hwpx(
     *,
     template_data: bytes,
@@ -76,14 +82,21 @@ def fill_template_hwpx(
     keeps all XML structure, styles, tables, and ZIP entry metadata, and only
     rewrites existing ``<hp:t>`` text nodes in section XML files.
     """
+    if len(template_data) > _MAX_TEMPLATE_BYTES:
+        raise ValueError(f"HWPX 템플릿이 너무 큽니다(> {_MAX_TEMPLATE_BYTES} bytes)")
 
     lines = _template_lines(title=title, body=body)
     source = io.BytesIO(template_data)
     out = io.BytesIO()
     with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(out, "w") as zout:
+        infos = zin.infolist()
+        if len(infos) > _MAX_ENTRIES:
+            raise ValueError(f"HWPX 템플릿 항목 수 초과(> {_MAX_ENTRIES})")
+        if sum(i.file_size for i in infos) > _MAX_UNCOMPRESSED_BYTES:
+            raise ValueError("HWPX 템플릿 해제 크기 초과(zip 폭탄 의심)")
         section_names = _section_names(zin)
         remaining = list(lines)
-        for original_info in zin.infolist():
+        for original_info in infos:
             data = zin.read(original_info.filename)
             if original_info.filename in section_names:
                 text = data.decode("utf-8")
