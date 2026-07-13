@@ -11,6 +11,9 @@ ingest/.env.worker
 __pycache__/
 *.pyc
 
+# 생성 부산물(검증 리포트)
+phase6-report.json
+
 # Node / Next.js / Vercel (web/)
 node_modules/
 .next/
