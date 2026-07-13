@@ -374,6 +374,17 @@ class TestApiSecretGate(unittest.TestCase):
         finally:
             service.settings = original
 
+    def test_candidate_count_decouples_pool_from_user_k(self):
+        service = load_service_module()
+        s = SimpleNamespace(rerank_max_candidates=50)
+        # 결과 상한(k)과 무관하게 후보를 rerank_max_candidates 까지 가져온다.
+        self.assertEqual(service._candidate_count(8, s), 50)
+        self.assertEqual(service._candidate_count(12, s), 50)
+        # SQL 클램프(60) 를 넘지 않는다.
+        self.assertEqual(service._candidate_count(8, SimpleNamespace(rerank_max_candidates=200)), 60)
+        # k 가 후보 상한보다 크면 k 를 존중한다.
+        self.assertEqual(service._candidate_count(55, SimpleNamespace(rerank_max_candidates=50)), 55)
+
     def test_target_year_accepts_only_reasonable_years(self):
         service = load_service_module()
         self.assertEqual(service._target_year({"target_year": "2026"}), 2026)

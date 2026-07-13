@@ -40,15 +40,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         embedder=make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version),
     )
 
+    force = getattr(args, "force", False)
     zips = iter_zip_files(settings.zip_dir)
     print(f"ZIP {len(zips)}개 발견 @ {settings.zip_dir} "
-          f"(dry_run={settings.dry_run}, embed={settings.embed_provider}, ocr={settings.ocr_backend})")
+          f"(dry_run={settings.dry_run}, embed={settings.embed_provider}, "
+          f"ocr={settings.ocr_backend}, force={force})")
 
     stats: Counter[str] = Counter()
     zip_root = Path(settings.zip_dir)
     for zp in zips:
         print(f"\n# {zp.name}")
-        for item in iter_work(zp, store, zip_root=zip_root):
+        for item in iter_work(zp, store, zip_root=zip_root, force=force):
             status = process(item, deps)
             stats[status.value] += 1
 
@@ -116,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run", help="ZIP 폴더 인제스트 실행")
     r.add_argument("--path", help="ZIP 폴더 경로(기본 KMU_ZIP_DIR)")
     r.add_argument("--dry-run", action="store_true", help="DB 미적재, 콘솔 출력만")
+    r.add_argument("--force", action="store_true",
+                   help="이미 적재된 ZIP도 재처리(파서·청킹·메타 개선 소급 적용)")
     r.set_defaults(func=cmd_run)
     b = sub.add_parser("backfill", help="pending_password/pending_ocr 문서만 안전하게 백필")
     b.add_argument("--zip-dir", help="원본 ZIP 폴더 경로(기본 KMU_ZIP_DIR)")

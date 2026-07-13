@@ -25,11 +25,18 @@ class TestOperationalGuardrails(unittest.TestCase):
         self.assertIn("idx_doc_chunks_document_id", sql)
         self.assertIn("idx_access_log_user_at", sql)
         self.assertIn("filter_year int default null", sql)
-        self.assertIn("least(coalesce(match_count, 8), 20)", sql)
         self.assertIn("least(coalesce(pool, 50), 80)", sql)
         self.assertIn("create or replace function cleanup_access_log", sql)
         self.assertIn("create or replace function admin_storage_health", sql)
         self.assertIn("'pgvector_hnsw'", sql)
+
+    def test_rerank_candidate_pool_migration_raises_match_count_clamp(self):
+        sql = (ROOT / "supabase/migrations/0010_rerank_candidate_pool.sql").read_text(
+            encoding="utf-8"
+        )
+        # 후보 상한을 20 → 60 으로 올리고, 사용되지 않는 6-인자 오버로드를 정리한다.
+        self.assertIn("least(coalesce(match_count, 8), 60)", sql)
+        self.assertIn("drop function if exists hybrid_search(vector, text, int, int, int, text)", sql)
 
     def test_runtime_code_exposes_chunk_and_search_limits(self):
         config = (ROOT / "ingest/kmu_ingest/config.py").read_text(encoding="utf-8")

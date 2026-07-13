@@ -89,10 +89,17 @@ def _zip_fields(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
     return best_any or {}
 
 
-def iter_work(zip_path: Path, store, *, zip_root: Path | None = None) -> Iterator[WorkItem]:
-    """한 ZIP을 열어 처리 대상 파일들을 WorkItem 으로 산출."""
+def iter_work(
+    zip_path: Path, store, *, zip_root: Path | None = None, force: bool = False,
+) -> Iterator[WorkItem]:
+    """한 ZIP을 열어 처리 대상 파일들을 WorkItem 으로 산출.
+
+    force=True면 이미 적재된 ZIP도 재처리한다(파서·청킹·메타 개선을 소급 적용).
+    재처리는 멱등이다: register_zip/upsert_document는 sha256 on-conflict 갱신,
+    insert_chunks는 기존 청크 삭제 후 재삽입한다.
+    """
     zsha = sha256_file(zip_path)
-    if store.zip_seen(zsha):
+    if not force and store.zip_seen(zsha):
         return  # 이미 적재된 ZIP → 스킵(멱등)
 
     with zipfile.ZipFile(zip_path) as zf:

@@ -89,6 +89,18 @@ def _bounded_k(body: dict, *, default: int | None = None) -> int:
     return max(1, min(requested, settings.api_max_k))
 
 
+# hybrid_search SQL 이 match_count 를 60 으로 클램프하므로 후보 상한도 60.
+_CANDIDATE_HARD_CAP = 60
+
+
+def _candidate_count(k: int, current_settings=settings) -> int:
+    """리랭크 후보 풀 크기. 사용자 결과 상한(k, KMU_API_MAX_K)과 분리해
+    rerank_max_candidates 까지 후보를 가져온다(SQL 클램프 60 이내). 리랭커가 넓은
+    후보에서 상위 k를 재정렬하도록 해 정확도를 높인다. 리랭크가 없어도 refine/focus
+    단계가 더 넓은 후보에서 고른다."""
+    return max(k, min(current_settings.rerank_max_candidates, _CANDIDATE_HARD_CAP))
+
+
 def _target_year(body: dict) -> int | None:
     value = body.get("target_year") or body.get("year")
     try:
@@ -130,7 +142,7 @@ async def search(
     client, retriever = _client_and_retriever(authorization)
     query = body.get("query", "")
     k = _bounded_k(body)
-    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = focus_sources(query, reranked.sources, limit=k)
@@ -154,7 +166,7 @@ async def chat(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body)
-    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
@@ -201,7 +213,7 @@ async def build_insights(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -236,7 +248,7 @@ async def build_studio(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -292,7 +304,7 @@ async def studio_summary(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, min(k * 3, settings.api_max_k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     answer_sources = focus_sources(query, reranked.sources, limit=k)
@@ -338,7 +350,7 @@ async def hermes_report(
     target_year = body.get("target_year")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, k, body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -370,7 +382,7 @@ async def wiki_report(
     k = _bounded_k(body, default=12)
     sources = retriever.retrieve(
         query,
-        k,
+        _candidate_count(k),
         body.get("dept"),
         _target_year(body),
     )

@@ -7,11 +7,12 @@ from kmu_ingest.watcher import iter_work, iter_zip_files
 
 
 class CaptureZipStore:
-    def __init__(self):
+    def __init__(self, *, seen=False):
         self.registered = []
+        self._seen = seen
 
     def zip_seen(self, sha256):
-        return False
+        return self._seen
 
     def register_zip(self, filename, sha256, file_count, *, source_path=None):
         self.registered.append({
@@ -54,6 +55,19 @@ class TestWatcherSourcePaths(unittest.TestCase):
         self.assertEqual(len(items), 1)
         self.assertEqual(store.registered[0]["filename"], "download.zip")
         self.assertEqual(store.registered[0]["source_path"], "incoming/2026/download.zip")
+
+    def test_seen_zip_is_skipped_unless_force(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "seen.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("기안문.txt", "제 목 재처리 대상")
+
+            # 이미 적재된(zip_seen=True) ZIP: 기본은 스킵, force면 재처리.
+            skipped = list(iter_work(zip_path, CaptureZipStore(seen=True)))
+            forced = list(iter_work(zip_path, CaptureZipStore(seen=True), force=True))
+
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(forced), 1)
 
 
 if __name__ == "__main__":
