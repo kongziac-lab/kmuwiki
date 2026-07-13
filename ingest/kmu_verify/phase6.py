@@ -24,15 +24,38 @@ def write_report(path: Path, checks: list[VerificationResult]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def rag_proxy_auth_check(web: Path) -> VerificationResult:
+    """RAG 프록시 라우트 전수 검사: resolveRagBase 를 쓰는 모든 route.ts 가
+    업스트림 호출 전에 rejectMissingAuthorization 을 호출해야 한다.
+
+    헬퍼 존재 여부만 보면 새 라우트가 인증 검사를 빠뜨려도 통과하므로,
+    라우트 파일 단위로 강제한다(누락 시 해당 경로를 detail 에 나열).
+    """
+    proxies: list[str] = []
+    missing: list[str] = []
+    for p in sorted((web / "app" / "api").rglob("route.ts")):
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        if "resolveRagBase" not in text:
+            continue
+        rel = p.relative_to(web).as_posix()
+        proxies.append(rel)
+        if "rejectMissingAuthorization" not in text:
+            missing.append(rel)
+    ok = bool(proxies) and not missing
+    detail = (
+        f"all {len(proxies)} RAG proxy routes call rejectMissingAuthorization"
+        if ok
+        else (f"RAG proxy routes missing auth guard: {', '.join(missing)}"
+              if missing else "no RAG proxy routes found under web/app/api")
+    )
+    return VerificationResult("web-proxy-auth", ok, detail)
+
+
 def run_static_checks(root: Path) -> list[VerificationResult]:
     web = root / "web"
     migrations = root / "supabase" / "migrations"
     checks = [
-        VerificationResult(
-            "web-proxy-auth",
-            "rejectMissingAuthorization" in (web / "lib" / "ragProxy.ts").read_text(encoding="utf-8"),
-            "web API proxies require a user Authorization header before RAG calls",
-        ),
+        rag_proxy_auth_check(web),
         VerificationResult(
             "no-service-role-in-web",
             "SUPABASE_SERVICE_ROLE_KEY" not in "\n".join(
