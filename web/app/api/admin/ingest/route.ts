@@ -4,7 +4,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { ApiError, bearerToken, errorResponse, requireAdmin } from "@/lib/adminAuth";
-import { buildIngestCommand, isLocalIngestAllowed, resolveZipDir } from "@/lib/localIngest";
+import {
+  buildIngestCommand,
+  isLocalIngestAllowed,
+  isZipDirAllowed,
+  parseAllowedIngestDirs,
+  resolveZipDir,
+} from "@/lib/localIngest";
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +66,11 @@ export async function POST(req: Request) {
     }
     if (!status.allowed) {
       return new Response("local ingest is only available from localhost or a private LAN host", { status: 409 });
+    }
+    // 선택 강화: KMU_LOCAL_INGEST_ALLOWED_DIRS(콤마 구분)를 설정하면 그 하위 경로만 허용.
+    const allowedDirs = parseAllowedIngestDirs(process.env.KMU_LOCAL_INGEST_ALLOWED_DIRS);
+    if (!isZipDirAllowed(status.zipDir, allowedDirs)) {
+      return new Response("zip folder is outside KMU_LOCAL_INGEST_ALLOWED_DIRS", { status: 403 });
     }
 
     const command = buildIngestCommand(status.zipDir);

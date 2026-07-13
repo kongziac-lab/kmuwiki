@@ -30,7 +30,7 @@ class Settings:
     zip_dir: str = os.environ.get("KMU_ZIP_DIR", "./zips")
 
     # 임베딩 (불변식 6: 모델 핀)
-    embed_provider: str = os.environ.get("KMU_EMBED_PROVIDER", "fake")  # fake|bge-m3|openai
+    embed_provider: str = os.environ.get("KMU_EMBED_PROVIDER", "fake")  # fake|bge-m3|cohere
     embed_model: str = os.environ.get("KMU_EMBED_MODEL", "fake-deterministic")
     embed_version: str = os.environ.get("KMU_EMBED_VERSION", "v1")
 

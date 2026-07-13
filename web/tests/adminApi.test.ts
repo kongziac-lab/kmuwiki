@@ -8,6 +8,8 @@ import {
   isPrivateNetworkHost,
   isSupportedLocalFolderPath,
   isLocalIngestAllowed,
+  isZipDirAllowed,
+  parseAllowedIngestDirs,
   resolveZipDir,
 } from "../lib/localIngest.ts";
 
@@ -77,6 +79,30 @@ test("web local ingest can use an admin supplied absolute zip folder", () => {
   const command = buildIngestCommand(requested, { pythonBin: "python", ingestCwd: String.raw`C:\kmuwiki\ingest` });
 
   assert.deepEqual(command.args, ["-m", "kmu_ingest.cli", "run", "--path", String.raw`\\NAS\KMU-Wiki-Zips\2026`]);
+});
+
+test("zip folder allowlist restricts admin supplied paths when configured", () => {
+  // 미설정 → 제한 없음(기존 동작 유지)
+  assert.equal(isZipDirAllowed(String.raw`Z:\anything`, parseAllowedIngestDirs(undefined)), true);
+  assert.equal(isZipDirAllowed("/tmp/x", parseAllowedIngestDirs("")), true);
+
+  const allowed = parseAllowedIngestDirs(String.raw`\\NAS\jdh\kmuwiki, Z:\KMU-Wiki-Zips`);
+  // 하위 경로·대소문자·구분자(\, /) 차이는 허용
+  assert.equal(isZipDirAllowed(String.raw`\\NAS\jdh\kmuwiki\2026`, allowed), true);
+  assert.equal(isZipDirAllowed("//nas/JDH/kmuwiki", allowed), true);
+  assert.equal(isZipDirAllowed(String.raw`Z:\KMU-Wiki-Zips\2025`, allowed), true);
+  // 목록 밖·이름 접두사 우회·".." 탈출은 거부
+  assert.equal(isZipDirAllowed(String.raw`\\NAS\jdh\other`, allowed), false);
+  assert.equal(isZipDirAllowed(String.raw`\\NAS\jdh\kmuwiki-evil`, allowed), false);
+  assert.equal(isZipDirAllowed(String.raw`\\NAS\jdh\kmuwiki\..\secret`, allowed), false);
+});
+
+test("admin ingest route enforces the zip folder allowlist", () => {
+  const route = readFileSync(new URL("../app/api/admin/ingest/route.ts", import.meta.url), "utf8");
+
+  assert.match(route, /parseAllowedIngestDirs\(process\.env\.KMU_LOCAL_INGEST_ALLOWED_DIRS\)/);
+  assert.match(route, /isZipDirAllowed\(status\.zipDir, allowedDirs\)/);
+  assert.match(route, /status: 403/);
 });
 
 test("admin ingest page posts the selected local folder path", () => {

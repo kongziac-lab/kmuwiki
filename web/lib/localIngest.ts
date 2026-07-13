@@ -89,6 +89,28 @@ export function isLocalIngestAllowed({
   return true;
 }
 
+export function parseAllowedIngestDirs(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw.split(",").map((part) => part.trim()).filter(Boolean);
+}
+
+function canonicalizeFolderPath(input: string): string {
+  // Windows 드라이브·UNC·POSIX 경로를 같은 형태로 통일해 비교한다.
+  // posix.normalize 가 ".." 세그먼트를 해소하므로 allowlist 밖으로의 탈출을 막는다.
+  const unified = input.trim().replace(/\\/g, "/");
+  const collapsed = path.posix.normalize(unified);
+  return collapsed.replace(/\/+$/, "").toLowerCase();
+}
+
+export function isZipDirAllowed(zipDir: string, allowedDirs: string[]): boolean {
+  if (allowedDirs.length === 0) return true; // 미설정 = 제한 없음(기존 동작 유지)
+  const target = canonicalizeFolderPath(zipDir);
+  return allowedDirs.some((base) => {
+    const canonicalBase = canonicalizeFolderPath(base);
+    return target === canonicalBase || target.startsWith(`${canonicalBase}/`);
+  });
+}
+
 export function resolveIngestCwd(env: LocalIngestEnv = process.env, webCwd = process.cwd()): string {
   if (env.KMU_INGEST_CWD?.trim()) return env.KMU_INGEST_CWD.trim();
   const sibling = path.resolve(webCwd, "../ingest");
