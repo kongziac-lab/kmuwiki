@@ -24,6 +24,11 @@ from .store import make_store
 from .watcher import iter_work, iter_zip_files
 
 
+# --force 재처리 대상: 인제스트가 만든 종결 상태. superseded/revoked(관리자 라이프사이클)는
+# 되돌리지 않는다. pending_*는 재처리해도 무해(다시 pending). 핵심은 processed 메타 갱신.
+FORCE_REPROCESS_STATUSES = {"processed", "pending_password", "pending_ocr"}
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     settings = load_settings()
     if args.path:
@@ -31,6 +36,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         settings.dry_run = True
 
+    force = getattr(args, "force", False)
     store = make_store(settings)
     deps = Deps(
         settings=settings,
@@ -38,9 +44,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         masker=Masker(enable_ner=settings.enable_ner, ner_model=settings.ner_model),
         ocr=OCREngine(settings.ocr_backend),
         embedder=make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version),
+        reprocess_statuses=FORCE_REPROCESS_STATUSES if force else set(),
     )
 
-    force = getattr(args, "force", False)
     zips = iter_zip_files(settings.zip_dir)
     print(f"ZIP {len(zips)}개 발견 @ {settings.zip_dir} "
           f"(dry_run={settings.dry_run}, embed={settings.embed_provider}, "

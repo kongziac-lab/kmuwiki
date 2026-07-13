@@ -96,6 +96,33 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(first, DocStatus.PROCESSED)
         self.assertEqual(second, DocStatus.PROCESSED)
 
+    def test_force_reprocess_statuses_actually_reprocesses(self):
+        # reprocess_statuses 가 비면(기본) processed 문서는 재처리 스킵 → upsert 1회.
+        # processed 를 포함하면(=run --force) 두 번째도 재처리 → upsert 2회.
+        class CountingStore(CapturingStore):
+            def __init__(self):
+                super().__init__()
+                self.upserts = 0
+
+            def upsert_document(self, **kw):
+                self.upserts += 1
+                return super().upsert_document(**kw)
+
+        wi = item("기안문.txt", "내용 hello world 재처리 대상".encode())
+
+        default = make_deps()
+        default.store = CountingStore()
+        process(wi, default)
+        process(wi, default)
+        self.assertEqual(default.store.upserts, 1)
+
+        forced = make_deps()
+        forced.store = CountingStore()
+        forced.reprocess_statuses = {"processed"}
+        process(wi, forced)
+        process(wi, forced)
+        self.assertEqual(forced.store.upserts, 2)
+
     def test_egress_gate_quarantines_when_masking_fails(self):
         # 마스킹이 PII를 놓친 상황 시뮬레이션(원문 그대로 반환)
         class NoMask:
