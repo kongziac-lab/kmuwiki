@@ -8,12 +8,24 @@
 교내(온프레미스)                          클라우드
 ┌─────────────────────────────┐         ┌──────────────────────┐
 │ DS920+ (데이터 허브·마스킹 경계선) │  마스킹된  │ Supabase(pgvector·RLS) │
-│  ├ 공유폴더 jdh/Kmuwiki (원본 ZIP) │  데이터만  │ Vercel(웹·/rag)        │
-│  ├ Container Manager: ingest 워커 │ ────────▶ │ Cohere(임베딩 1024d)   │
-│  │   파싱·★마스킹★·이그레스게이트   │         │ Claude(답변 생성)      │
-│  └ 작업 스케줄러: 야간 배치        │         └──────────────────────┘
+│  ├ jdh/kmuwiki/00_inbox (투입)    │  데이터만  │ Vercel(웹·/rag)        │
+│  │    ↓ stager: 구조 검증 반입     │ ────────▶ │ Cohere(임베딩 1024d)   │
+│  ├ jdh/kmuwiki/01_raw (불변 원본)  │         │ Claude(답변 생성)      │
+│  │    (실패분 → 99_rejected 격리)  │         └──────────────────────┘
+│  ├ Container Manager: ingest 워커 │
+│  │   파싱·★마스킹★·이그레스게이트   │
+│  └ 작업 스케줄러: 야간 스테이징→배치 │
 └─────────────────────────────┘
 ```
+
+### 단계형 적재 (00_inbox → 검증 → 01_raw)
+
+새 ZIP 은 `00_inbox` 에만 투입한다. 야간 배치의 스테이저(`kmu_ingest.cli stage`)가
+구조 검증(zip 폭탄·비정상 파일·부분 업로드) 후 `01_raw` 로 반입하고, 실패분은
+`99_rejected/reasons.log` 와 함께 격리한다. 워커는 `01_raw` 만 `:ro` 로 읽으며,
+`01_raw` 는 덮어쓰지 않는다(동명이본은 `이름-<sha8>.zip` 으로 병존). 암호화 ZIP 은
+정상 입력으로 통과시킨다(`pending_password` 유예 흐름). Snapshot Replication
+일일 스냅샷으로 불변성을 보강한다.
 
 - **NAS = 데이터 중력의 중심.** 원본 ZIP(마스킹 前 원문)과 파싱·마스킹이 NAS 안에서 끝난다.
 - **클라우드 = 연산.** 임베딩·답변 생성은 API 호출. NAS엔 GPU가 없어 로컬 추론을 두지 않는다.
@@ -47,7 +59,8 @@ cp ingest/.env.worker.example ingest/.env.worker
 #    SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / COHERE_API_KEY 채움
 
 # 2) 원본 공유폴더 경로를 docker-compose.yml volumes 에 지정 (:ro 유지)
-#    이 환경: /volume1/jdh/Kmuwiki:/data/zips:ro  (Windows Y:\Kmuwiki 와 동일)
+#    이 환경: /volume1/jdh/kmuwiki/01_raw:/data/zips:ro  (Windows Y:\Kmuwiki\01_raw 와 동일)
+#    stager 는 00_inbox(rw)·01_raw(rw)·99_rejected(rw) 를 마운트한다.
 
 # 3) 1회성 배치 실행
 docker compose -f ingest/docker-compose.yml run --rm worker run

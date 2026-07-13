@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 
 from .backfill import DEFAULT_MAX_PASSWORD_ATTEMPTS, load_password_dictionary, run_backfill
 from .config import load_settings
+from .staging import StageLimits, stage_inbox
 from .embedding import make_embedder
 from .ocr import OCREngine
 from .pii.masker import Masker
@@ -92,6 +94,22 @@ def cmd_backfill(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_stage(args: argparse.Namespace) -> int:
+    report = stage_inbox(
+        Path(args.inbox), Path(args.raw), Path(args.rejected),
+        limits=StageLimits.from_env(),
+    )
+    print(f"스테이징: 반입 {len(report.staged)} · 중복 {len(report.duplicates)} "
+          f"· 보류 {len(report.skipped)} · 격리 {len(report.rejected)}")
+    for rel in report.staged:
+        print(f"  [in]   {rel}")
+    for rel, why in report.skipped:
+        print(f"  [wait] {rel} ({why})")
+    for rel, why in report.rejected:
+        print(f"  [rej]  {rel} ({why})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kmu_ingest")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -111,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--limit", type=int, default=100, help="이번 실행에서 조회할 최대 후보 수")
     b.add_argument("--dry-run", action="store_true", help="실제 처리 없이 후보/큐 동작만 확인")
     b.set_defaults(func=cmd_backfill)
+    s = sub.add_parser("stage", help="00_inbox 검증 후 01_raw 반입(실패분 99_rejected 격리)")
+    s.add_argument("--inbox", default=os.environ.get("KMU_INBOX_DIR", "/data/inbox"))
+    s.add_argument("--raw", default=os.environ.get("KMU_RAW_DIR", "/data/raw"))
+    s.add_argument("--rejected", default=os.environ.get("KMU_REJECTED_DIR", "/data/rejected"))
+    s.set_defaults(func=cmd_stage)
     args = p.parse_args(argv)
     return args.func(args)
 

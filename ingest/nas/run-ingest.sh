@@ -35,13 +35,22 @@ LOG="$LOG_DIR/ingest-$CMD-$TS.log"
 
 echo "[$(date)] start: $DC run --rm worker $CMD" | tee -a "$LOG"
 
-# --rm: 1회성 배치. 실패해도 로그를 남기고 정리까지 진행하도록 errexit 일시 해제.
+# 0) 스테이징: 00_inbox 검증 → 01_raw 반입(실패해도 인제스트는 계속 — 기존 원본 처리).
 set +e
+echo "[$(date)] stage: $DC run --rm stager" | tee -a "$LOG"
+$DC -f "$COMPOSE_FILE" run --rm stager >>"$LOG" 2>&1
+RC_STAGE=$?
+[ "$RC_STAGE" -ne 0 ] && echo "[$(date)] stage FAILED (exit=$RC_STAGE) — 계속 진행" | tee -a "$LOG"
+
+# 1) 인제스트. --rm: 1회성 배치. 실패해도 로그·정리까지 진행하도록 errexit 해제 상태 유지.
 $DC -f "$COMPOSE_FILE" run --rm worker "$CMD" >>"$LOG" 2>&1
 RC=$?
 set -e
 
-echo "[$(date)] end: exit=$RC" | tee -a "$LOG"
+# 종료코드: 둘 중 나쁜 쪽(스케줄러 알림용)
+if [ "$RC" -eq 0 ] && [ "$RC_STAGE" -ne 0 ]; then RC=$RC_STAGE; fi
+
+echo "[$(date)] end: exit=$RC (stage=$RC_STAGE)" | tee -a "$LOG"
 
 # 오래된 로그 정리(30일)
 find "$LOG_DIR" -name 'ingest-*.log' -mtime +30 -delete 2>/dev/null || true
