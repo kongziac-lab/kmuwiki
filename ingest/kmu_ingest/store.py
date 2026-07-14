@@ -84,11 +84,23 @@ class SupabaseStore:
         self, *, sha256: str, zip_id: str, meta: FileMeta, status: str,
         is_encrypted: bool = False, error: str | None = None,
     ) -> str:
+        row = self.document_row(
+            sha256=sha256, zip_id=zip_id, meta=meta, status=status,
+            is_encrypted=is_encrypted, error=error,
+        )
+        r = self.c.table("documents").upsert(row, on_conflict="sha256").execute()
+        return r.data[0]["id"]
+
+    @staticmethod
+    def document_row(
+        *, sha256: str, zip_id: str, meta: FileMeta, status: str,
+        is_encrypted: bool = False, error: str | None = None,
+    ) -> dict:
         row = {
             "sha256": sha256, "zip_id": zip_id,
             "filename": meta.filename, "path_in_zip": meta.path_in_zip,
             "mime_type": meta.mime_type, "is_encrypted": is_encrypted,
-            "status": status, "dept": meta.dept, "security_level": meta.security_level,
+            "status": status, "dept": meta.dept,
             "task_category": meta.task_category,
             "classification_confidence": meta.classification_confidence,
             "review_required": meta.review_required,
@@ -101,8 +113,14 @@ class SupabaseStore:
             "processed_at": datetime.now(timezone.utc).isoformat()
             if status == "processed" else None,
         }
-        r = self.c.table("documents").upsert(row, on_conflict="sha256").execute()
-        return r.data[0]["id"]
+        # security_level 은 파이프라인이 판정하지 않는 '운영자 결정'(관리자 검토로 승급).
+        # 파이프라인 meta 는 항상 None 이므로(metadata.py §7.B), None 이면 컬럼을 아예
+        # 보내지 않아 재처리(run --force)가 기존 등급을 NULL 로 파괴하지 않게 한다.
+        # (PostgREST upsert 는 전송한 컬럼만 갱신한다. RLS 는 '일반'만 노출하므로
+        #  등급 파괴 = 검색에서 문서 소실이었다.)
+        if meta.security_level is not None:
+            row["security_level"] = meta.security_level
+        return row
 
     def insert_chunks(
         self, document_id: str, chunks: list[Chunk],
