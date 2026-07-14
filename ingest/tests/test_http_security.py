@@ -67,6 +67,28 @@ class TestHttpSecurity(unittest.TestCase):
             validate_query_body({"query": "123456"}, settings)
         self.assertEqual(too_long.exception.status_code, 413)
 
+    def test_production_v2_pins_search_and_embedding_model(self):
+        base = dict(
+            is_production=True,
+            api_shared_secret="secret",
+            allowed_origins="https://wiki.example.edu",
+            api_rate_limit_per_minute=30,
+            index_version="v2",
+            search_rpc="hybrid_search_v2",
+            embed_provider="cohere",
+            embed_model="embed-v4.0",
+            embed_output_dimension=1024,
+        )
+        validate_runtime_security(SimpleNamespace(**base))
+        for update in (
+            {"search_rpc": "hybrid_search"},
+            {"embed_provider": "fake"},
+            {"embed_model": "embed-multilingual-v3.0"},
+            {"embed_output_dimension": 1536},
+        ):
+            with self.assertRaises(RuntimeError):
+                validate_runtime_security(SimpleNamespace(**(base | update)))
+
     def test_distributed_rate_limit_fails_closed_in_production(self):
         settings = SimpleNamespace(api_rate_limit_per_minute=2, is_production=True)
         client = FakeRateClient(True)

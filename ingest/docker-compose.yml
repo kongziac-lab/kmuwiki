@@ -29,10 +29,16 @@ services:
     environment:
       KMU_ZIP_DIR: /data/zips
       KMU_OCR_BACKEND: none        # OCR은 GPU 박스로 유예(pending_ocr)
+      KMU_LAYOUT_BACKEND: none     # PP-StructureV3는 Mac/GPU 시각 워커에서 실행
+      KMU_VISUAL_INDEX_ENABLED: "0" # 원본 이미지를 NAS에서 외부 전송하지 않음
       KMU_ENABLE_NER: "0"          # torch 미포함 이미지 — 성명 NER 비활성
       KMU_EMBED_PROVIDER: cohere   # 기본값 fake 방지: 실제 임베딩 강제
-      KMU_EMBED_MODEL: embed-multilingual-v3.0   # Cohere 실제 모델(1024d). 기본 fake-deterministic 방지
-      KMU_EMBED_VERSION: v3        # 기존 Supabase 데이터와 동일 모델 핀
+      KMU_EMBED_MODEL: embed-v4.0  # Cohere 멀티모달 v2 모델(1024d)
+      KMU_EMBED_VERSION: v4.0-1024
+      KMU_EMBED_OUTPUT_DIMENSION: "1024"
+      KMU_INDEX_VERSION: v2
+      KMU_SEARCH_RPC: hybrid_search_v2
+      KMU_WRITE_LEGACY_INDEX: "0" # v2 섀도 구축 중 기존 v1/v3 인덱스 보존
       KMU_MAX_ZIP_ENTRY_MB: "128"
       KMU_MAX_ZIP_COMPRESSION_RATIO: "200"
       KMU_PROVIDER_TIMEOUT_SECONDS: "120"

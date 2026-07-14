@@ -16,11 +16,11 @@ class RerankResult:
 
 
 class CohereReranker:
-    def __init__(self, api_key: str, model: str = "rerank-v3.5", timeout: float | None = None):
+    def __init__(self, api_key: str, model: str = "rerank-v4.0-fast", timeout: float | None = None):
         import cohere
 
         self.model = model
-        self._client = cohere.Client(api_key, timeout=timeout)
+        self._client = cohere.ClientV2(api_key, timeout=timeout)
 
     def rerank(self, query: str, sources: list[Source], *, top_n: int) -> list[Source]:
         documents = [_document_text(source) for source in sources]
@@ -63,10 +63,19 @@ def rerank_sources(
 
 
 def _document_text(source: Source) -> str:
-    return "\n".join(part for part in (
-        source.filename or "",
-        source.dept or "",
-        source.doc_no or "",
-        source.doc_date or "",
-        source.content or "",
-    ) if part)
+    # Rerank v4 is text-only.  Visual hits therefore carry their masked
+    # OCR/Markdown/caption surrogate as structured YAML-like text.
+    metadata = (
+        ("filename", source.filename),
+        ("department", source.dept),
+        ("document_number", source.doc_no),
+        ("document_date", source.doc_date),
+        ("modality", source.modality),
+        ("asset_type", source.asset_type),
+        ("page", source.page_no),
+    )
+    lines = [f"{key}: {value}" for key, value in metadata if value not in (None, "")]
+    if source.content:
+        lines.append("content: |")
+        lines.extend(f"  {line}" for line in source.content.splitlines())
+    return "\n".join(lines)

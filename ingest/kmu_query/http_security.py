@@ -25,6 +25,15 @@ def validate_runtime_security(settings) -> None:
         raise RuntimeError("KMU_ALLOWED_ORIGINS must be an explicit allow-list in production")
     if settings.api_rate_limit_per_minute < 1:
         raise RuntimeError("KMU_API_RATE_LIMIT_PER_MINUTE must be at least 1")
+    if getattr(settings, "index_version", None) == "v2":
+        if getattr(settings, "search_rpc", None) != "hybrid_search_v2":
+            raise RuntimeError("v2 production requires KMU_SEARCH_RPC=hybrid_search_v2")
+        if getattr(settings, "embed_provider", None) != "cohere":
+            raise RuntimeError("v2 production requires KMU_EMBED_PROVIDER=cohere")
+        if getattr(settings, "embed_model", None) != "embed-v4.0":
+            raise RuntimeError("v2 production requires KMU_EMBED_MODEL=embed-v4.0")
+        if getattr(settings, "embed_output_dimension", None) != 1024:
+            raise RuntimeError("v2 production requires 1024-dimensional embeddings")
 
 
 def require_api_secret(header_secret: str | None, settings) -> None:

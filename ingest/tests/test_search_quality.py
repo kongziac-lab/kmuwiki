@@ -14,12 +14,15 @@ class TestSearchQualityHarness(unittest.TestCase):
         metrics = evaluate_cases(cases)
         report = format_metrics(metrics)
 
-        self.assertEqual(metrics.count, 5)
+        self.assertEqual(metrics.count, 8)
         self.assertEqual(metrics.recall_at[5], 1.0)
         self.assertEqual(metrics.recall_at[10], 1.0)
         self.assertGreaterEqual(metrics.mrr, 0.9)
         self.assertTrue(metrics.passed)
         self.assertIn("Recall@5: 1.000", report)
+        self.assertEqual(metrics.unit_count, 3)
+        self.assertEqual(metrics.unit_recall_at[5], 1.0)
+        self.assertIn("Unit Recall@5: 1.000", report)
 
     def test_reports_misses(self):
         path = ROOT / ".tmp_search_quality_cases.jsonl"

@@ -32,6 +32,7 @@ from .retriever import Retriever
 from .rerank import CohereReranker, RerankResult, rerank_sources
 from .source_quality import refine_sources
 from .verification import focus_sources, needs_full_zip_context
+from .visual_assets import load_visual_inputs
 from .audit import log_access
 from .http_security import (
     authorize_request,
@@ -40,6 +41,7 @@ from .http_security import (
     require_api_secret as _require_api_secret,
     validate_query_body,
     validate_runtime_security,
+    bearer_token,
 )
 
 settings = load_settings()
@@ -62,7 +64,12 @@ app.add_middleware(
 
 def _authorized_context(authorization: str | None, api_secret: str | None, action: str):
     client = authorize_request(authorization, api_secret, action, settings)
-    return client, Retriever(client, _get_embedder())
+    return client, Retriever(
+        client,
+        _get_embedder(),
+        search_rpc=settings.search_rpc,
+        allow_v1_fallback=settings.allow_v1_search_fallback,
+    )
 
 
 def _get_embedder():
@@ -73,6 +80,7 @@ def _get_embedder():
             settings.embed_provider,
             settings.embed_model,
             settings.embed_version,
+            output_dimension=settings.embed_output_dimension,
         )
     return _embedder
 
@@ -233,9 +241,23 @@ async def chat(
             latency_ms=int((time.perf_counter() - started) * 1000),
             rerank_provider=reranked.provider, rerank_applied=reranked.applied,
         )
-        return answer_sources
+        visual_inputs = []
+        provider, _model = settings.resolve_llm()
+        if settings.visual_llm_enabled and provider in {"anthropic", "gemini"}:
+            visual_inputs = load_visual_inputs(
+                focused_sources,
+                supabase_url=settings.supabase_url,
+                anon_key=settings.supabase_anon_key,
+                user_jwt=bearer_token(authorization),
+                bucket=settings.visual_asset_bucket,
+                max_images=settings.visual_llm_max_images,
+                max_total_bytes=settings.visual_llm_max_total_bytes,
+                max_image_bytes=settings.visual_llm_max_image_bytes,
+                timeout=min(settings.provider_timeout_seconds, 30.0),
+            )
+        return answer_sources, visual_inputs
 
-    answer_sources = await run_in_threadpool(prepare)
+    answer_sources, visual_inputs = await run_in_threadpool(prepare)
 
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -252,6 +274,7 @@ async def chat(
             gemini_use_vertex=settings.gemini_use_vertex,
             gemini_project=settings.gemini_project,
             gemini_location=settings.gemini_location,
+            visual_inputs=visual_inputs,
         ):
             yield sse("token", delta)
         yield sse("done", {})

@@ -26,6 +26,13 @@ class Source:
     citation_doc_date: str | None = None
     citation_dept: str | None = None
     zip_id: str | None = None
+    search_unit_id: str | None = None
+    asset_id: str | None = None
+    modality: str = "text"
+    asset_type: str | None = None
+    page_no: int | None = None
+    bbox: list[float] | None = None
+    storage_path: str | None = None
 
     def label(self) -> str:
         """인용 표기용 짧은 출처 라벨."""
@@ -48,9 +55,18 @@ FULL_ZIP_CHAR_BUDGET = 150_000
 
 
 class Retriever:
-    def __init__(self, supabase_client, embedder):
+    def __init__(
+        self,
+        supabase_client,
+        embedder,
+        *,
+        search_rpc: str = "hybrid_search_v2",
+        allow_v1_fallback: bool = False,
+    ):
         self.client = supabase_client
         self.embedder = embedder
+        self.search_rpc = search_rpc
+        self.allow_v1_fallback = allow_v1_fallback
 
     def retrieve(
         self,
@@ -87,13 +103,19 @@ class Retriever:
             vec = self.embedder.embed_query(query)
         else:
             vec = self.embedder.embed([query])[0]
-        res = self.client.rpc("hybrid_search", {
+        params = {
             "query_embedding": vec,
             "query_text": query,
             "match_count": k,
             "filter_dept": dept,
             "filter_year": year,
-        }).execute()
+        }
+        try:
+            res = self.client.rpc(self.search_rpc, params).execute()
+        except Exception:
+            if not self.allow_v1_fallback or self.search_rpc == "hybrid_search":
+                raise
+            res = self.client.rpc("hybrid_search", params).execute()
         return res.data or []
 
     def _filename_fallback_sources(
@@ -113,7 +135,11 @@ class Retriever:
             try:
                 q = (
                     self.client.table("documents")
-                    .select("id,filename,doc_no,doc_date,dept,doc_chunks(chunk_index,content)")
+                    .select(
+                        "id,filename,doc_no,doc_date,dept,"
+                        "search_units(id,unit_index,content,modality,asset_type,page_no,bbox,"
+                        "document_assets(id,storage_path)),doc_chunks(chunk_index,content)"
+                    )
                     .eq("status", "processed")
                     .ilike("filename", f"%{term}%")
                 )
@@ -130,17 +156,25 @@ class Retriever:
                 if not doc_id or doc_id in seen_docs:
                     continue
                 seen_docs.add(doc_id)
-                chunks = sorted(row.get("doc_chunks") or [], key=lambda c: int(c.get("chunk_index") or 0))
+                chunks = sorted(_row_units(row), key=lambda c: int(
+                    c.get("unit_index", c.get("chunk_index", 0)) or 0))
                 for chunk in chunks[:3] or [{"chunk_index": 0, "content": ""}]:
                     sources.append(Source(
                         document_id=doc_id,
-                        chunk_index=int(chunk.get("chunk_index") or 0),
+                        chunk_index=int(chunk.get("unit_index", chunk.get("chunk_index", 0)) or 0),
                         content=chunk.get("content") or "",
                         score=0.08 - (0.005 * term_index),
                         filename=row.get("filename"),
                         doc_no=row.get("doc_no"),
                         doc_date=str(row["doc_date"]) if row.get("doc_date") else None,
                         dept=row.get("dept"),
+                        search_unit_id=str(chunk["id"]) if chunk.get("id") else None,
+                        asset_id=_nested_asset_value(chunk, "id"),
+                        modality=chunk.get("modality") or "text",
+                        asset_type=chunk.get("asset_type"),
+                        page_no=int(chunk["page_no"]) if chunk.get("page_no") else None,
+                        bbox=chunk.get("bbox"),
+                        storage_path=_nested_asset_value(chunk, "storage_path"),
                     ))
                     if len(sources) >= limit:
                         return sources
@@ -251,7 +285,9 @@ class Retriever:
             self.client.table("documents")
             .select(
                 "id,zip_id,filename,doc_no,doc_date,dept,document_kind,"
-                "zip_archives(filename,source_path),doc_chunks(chunk_index,content)"
+                "zip_archives(filename,source_path),"
+                "search_units(id,unit_index,content,modality,asset_type,page_no,bbox,"
+                "document_assets(id,storage_path)),doc_chunks(chunk_index,content)"
             )
             .in_("zip_id", zip_ids)
             .eq("status", "processed")
@@ -278,8 +314,9 @@ class Retriever:
             count = per_zip.get(zip_id, 0)
             if limit_per_zip is not None and count >= limit_per_zip:
                 continue
-            chunks = row.get("doc_chunks") or []
-            for chunk in sorted(chunks, key=lambda c: int(c.get("chunk_index") or 0)):
+            chunks = _row_units(row)
+            for chunk in sorted(chunks, key=lambda c: int(
+                    c.get("unit_index", c.get("chunk_index", 0)) or 0)):
                 if limit_per_zip is not None and count >= limit_per_zip:
                     break
                 content = chunk.get("content") or ""
@@ -287,7 +324,7 @@ class Retriever:
                     return sources
                 sources.append(Source(
                     document_id=str(row["id"]),
-                    chunk_index=int(chunk.get("chunk_index") or 0),
+                    chunk_index=int(chunk.get("unit_index", chunk.get("chunk_index", 0)) or 0),
                     content=content,
                     score=0.0,
                     filename=row.get("filename"),
@@ -300,6 +337,13 @@ class Retriever:
                                        if representative.get("doc_date") else None),
                     citation_dept=representative.get("dept") or row.get("dept"),
                     zip_id=zip_id,
+                    search_unit_id=str(chunk["id"]) if chunk.get("id") else None,
+                    asset_id=_nested_asset_value(chunk, "id"),
+                    modality=chunk.get("modality") or "text",
+                    asset_type=chunk.get("asset_type"),
+                    page_no=int(chunk["page_no"]) if chunk.get("page_no") else None,
+                    bbox=chunk.get("bbox"),
+                    storage_path=_nested_asset_value(chunk, "storage_path"),
                 ))
                 total_chars += len(content)
                 count += 1
@@ -397,17 +441,36 @@ def _sources_from_rows(rows: list[dict]) -> list[Source]:
                            if r.get("citation_doc_date") else None),
         citation_dept=r.get("citation_dept"),
         zip_id=str(r["zip_id"]) if r.get("zip_id") else None,
+        search_unit_id=str(r["search_unit_id"]) if r.get("search_unit_id") else None,
+        asset_id=str(r["asset_id"]) if r.get("asset_id") else None,
+        modality=r.get("modality") or "text",
+        asset_type=r.get("asset_type"),
+        page_no=int(r["page_no"]) if r.get("page_no") else None,
+        bbox=r.get("bbox"),
+        storage_path=r.get("storage_path"),
     ) for r in rows]
 
 
 def _dedupe_sources(sources: list[Source]) -> list[Source]:
-    by_key: dict[tuple[str, int], Source] = {}
+    by_key: dict[tuple[str, str | int], Source] = {}
     for source in sources:
-        key = (source.document_id, source.chunk_index)
+        key = (source.document_id, source.search_unit_id or source.chunk_index)
         existing = by_key.get(key)
         if existing is None or source.score > existing.score:
             by_key[key] = source
     return list(by_key.values())
+
+
+def _row_units(row: dict) -> list[dict]:
+    return list(row.get("search_units") or row.get("doc_chunks") or [])
+
+
+def _nested_asset_value(unit: dict, field: str):
+    asset = unit.get("document_assets") or {}
+    if isinstance(asset, list):
+        asset = asset[0] if asset else {}
+    value = asset.get(field) if isinstance(asset, dict) else None
+    return str(value) if value is not None else None
 
 
 def _expanded_retrieval_queries(query: str) -> tuple[str, ...]:

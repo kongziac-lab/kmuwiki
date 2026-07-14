@@ -3,3 +3,6 @@
 {"id":"semantic","query":"작년에 했던 중국어 문화탐방 유사 사업","dept":"국제교류팀","year":2026,"intent":"semantic","relevant_ids":["doc-224"],"retrieved_ids":["doc-224","doc-680","doc-34"]}
 {"id":"table","query":"공자아카데미 예산상세산출내역서","dept":"국제교류팀","year":2026,"intent":"table","relevant_ids":["doc-407-budget"],"retrieved_ids":["doc-407-budget","doc-34-settlement","doc-224"]}
 {"id":"date","query":"2026년 3월 6일 공자아카데미 결산 관련 문서","dept":"국제교류팀","year":2026,"intent":"date","relevant_ids":["doc-34"],"retrieved_ids":["doc-34","doc-224","doc-680"]}
+{"id":"visual-chart","query":"분기별 참가자 증가 추세가 표시된 차트","dept":"국제교류팀","year":2026,"intent":"chart","relevant_ids":["doc-chart"],"retrieved_ids":["doc-chart","doc-224"],"relevant_unit_ids":["unit-chart-p4"],"retrieved_unit_ids":["unit-chart-p4","unit-chart-caption"]}
+{"id":"visual-table-cell","query":"예산표에서 홍보비 합계 120만원인 항목","dept":"국제교류팀","year":2026,"intent":"table","relevant_ids":["doc-budget"],"retrieved_ids":["doc-budget","doc-34-settlement"],"relevant_unit_ids":["unit-budget-table-p2"],"retrieved_unit_ids":["unit-budget-table-p2","unit-budget-text"]}
+{"id":"visual-scan","query":"스캔된 협약서 직인 옆 체결일","dept":"국제교류팀","year":2026,"intent":"image","relevant_ids":["doc-agreement"],"retrieved_ids":["doc-agreement","doc-680"],"relevant_unit_ids":["unit-agreement-image-p1"],"retrieved_unit_ids":["unit-agreement-image-p1","unit-agreement-text"]}

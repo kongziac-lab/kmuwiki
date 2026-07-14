@@ -5,7 +5,13 @@ import { MarkdownAnswer } from "@/components/MarkdownAnswer";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 import { useBatchedText } from "@/lib/useBatchedText";
 
-type Citation = { n: number; label: string };
+type Citation = {
+  n: number;
+  label: string;
+  modality?: string;
+  asset_type?: string | null;
+  page_no?: number | null;
+};
 
 export function ChatClient() {
   const [email, setEmail] = useState<string | null>(null);

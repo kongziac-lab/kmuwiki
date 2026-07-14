@@ -39,9 +39,35 @@ class Settings:
     embed_provider: str = os.environ.get("KMU_EMBED_PROVIDER", "fake")  # fake|bge-m3|cohere
     embed_model: str = os.environ.get("KMU_EMBED_MODEL", "fake-deterministic")
     embed_version: str = os.environ.get("KMU_EMBED_VERSION", "v1")
+    embed_output_dimension: int = int(os.environ.get("KMU_EMBED_OUTPUT_DIMENSION", str(EMBED_DIM)))
+    index_version: str = os.environ.get("KMU_INDEX_VERSION", "v2")
+    search_rpc: str = os.environ.get("KMU_SEARCH_RPC", "hybrid_search_v2")
+    allow_v1_search_fallback: bool = os.environ.get("KMU_ALLOW_V1_SEARCH_FALLBACK", "0") == "1"
+    # Initial rebuild is a shadow migration: preserve v1/v3 doc_chunks until
+    # v2 is complete. Enable only in a maintenance window after model alignment.
+    write_legacy_index: bool = os.environ.get("KMU_WRITE_LEGACY_INDEX", "0") == "1"
 
     # OCR
     ocr_backend: str = os.environ.get("KMU_OCR_BACKEND", "easyocr")  # easyocr|paddle|none
+    layout_backend: str = os.environ.get("KMU_LAYOUT_BACKEND", "none")  # ppstructure|none
+    visual_index_enabled: bool = os.environ.get("KMU_VISUAL_INDEX_ENABLED", "1") == "1"
+    visual_require_security_level: str = os.environ.get(
+        "KMU_VISUAL_REQUIRE_SECURITY_LEVEL", "일반")
+    visual_verify_redaction: bool = os.environ.get("KMU_VISUAL_VERIFY_REDACTION", "1") == "1"
+    visual_max_input_bytes: int = int(os.environ.get("KMU_VISUAL_MAX_INPUT_MB", "20")) * 1024 * 1024
+    visual_max_pixels: int = int(os.environ.get("KMU_VISUAL_MAX_PIXELS", "20000000"))
+    visual_max_side: int = int(os.environ.get("KMU_VISUAL_MAX_SIDE", "2000"))
+    visual_jpeg_quality: int = int(os.environ.get("KMU_VISUAL_JPEG_QUALITY", "85"))
+    visual_asset_bucket: str = os.environ.get("KMU_VISUAL_ASSET_BUCKET", "kmuwiki-assets")
+    visual_llm_enabled: bool = os.environ.get("KMU_VISUAL_LLM_ENABLED", "1") == "1"
+    visual_llm_max_images: int = int(os.environ.get("KMU_VISUAL_LLM_MAX_IMAGES", "4"))
+    visual_llm_max_total_bytes: int = int(
+        os.environ.get("KMU_VISUAL_LLM_MAX_TOTAL_MB", "8")) * 1024 * 1024
+    visual_llm_max_image_bytes: int = int(
+        os.environ.get("KMU_VISUAL_LLM_MAX_IMAGE_MB", "4")) * 1024 * 1024
+    max_visual_pages: int = int(os.environ.get("KMU_MAX_VISUAL_PAGES", "100"))
+    max_assets_per_doc: int = int(os.environ.get("KMU_MAX_ASSETS_PER_DOC", "200"))
+    max_search_units_per_doc: int = int(os.environ.get("KMU_MAX_SEARCH_UNITS_PER_DOC", "250"))
 
     # 마스킹 정책 (§7.A). 빈 값=내부결재문 기본(성명·전화·주소 보존), "all"=전체, 또는 콤마목록.
     mask_labels: str = os.environ.get("KMU_MASK_LABELS", "")
@@ -74,7 +100,7 @@ class Settings:
     # Google Gemini 직접 연결(google-genai). 답변 생성 전용. 임베딩은 항상 Cohere(1024d) 유지.
     gemini_api_key: str = (os.environ.get("GEMINI_API_KEY")
                            or os.environ.get("GOOGLE_API_KEY", ""))
-    gemini_model: str = os.environ.get("KMU_GEMINI_MODEL", "gemini-2.5-pro")
+    gemini_model: str = os.environ.get("KMU_GEMINI_MODEL", "gemini-3.5-flash")
     gemini_use_vertex: bool = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "0").lower() in ("1", "true", "yes")
     gemini_project: str = (os.environ.get("GOOGLE_CLOUD_PROJECT")
                            or os.environ.get("GOOGLE_GENAI_PROJECT", ""))
@@ -97,7 +123,7 @@ class Settings:
     provider_timeout_seconds: float = float(os.environ.get("KMU_PROVIDER_TIMEOUT_SECONDS", "120"))
     audit_retention_days: int = int(os.environ.get("KMU_AUDIT_RETENTION_DAYS", "180"))
     rerank_provider: str = os.environ.get("KMU_RERANK_PROVIDER", "cohere")
-    rerank_model: str = os.environ.get("KMU_RERANK_MODEL", "rerank-v3.5")
+    rerank_model: str = os.environ.get("KMU_RERANK_MODEL", "rerank-v4.0-fast")
     rerank_max_candidates: int = int(os.environ.get("KMU_RERANK_MAX_CANDIDATES", "50"))
 
     def resolve_llm(self) -> tuple[str, str]:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from collections import Counter
@@ -17,33 +18,47 @@ from .backfill import DEFAULT_MAX_PASSWORD_ATTEMPTS, load_password_dictionary, r
 from .config import load_settings
 from .staging import StageLimits, stage_inbox
 from .embedding import make_embedder
+from .layout import LayoutAnalyzer
 from .ocr import OCREngine
 from .pii.masker import Masker
+from .pii.policy import MaskPolicy
 from .pipeline import Deps, process
 from .store import make_store
+from .visual import VisualSanitizer
 from .watcher import iter_work, iter_zip_files
 
 
 # --force 재처리 대상: 인제스트가 만든 종결 상태. superseded/revoked(관리자 라이프사이클)는
-# 되돌리지 않는다. pending_*는 재처리해도 무해(다시 pending). 핵심은 processed 메타 갱신.
-FORCE_REPROCESS_STATUSES = {"processed", "pending_password", "pending_ocr"}
+# 되돌리지 않는다. failed는 파서/모델 개선으로 복구할 수 있으므로 전체 v2 재구축에 포함한다.
+FORCE_REPROCESS_STATUSES = {"processed", "pending_password", "pending_ocr", "failed"}
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     settings = load_settings()
-    if args.path:
+    if getattr(args, "path", None):
         settings.zip_dir = args.path
-    if args.dry_run:
+    if getattr(args, "dry_run", False):
         settings.dry_run = True
 
     force = getattr(args, "force", False)
     store = make_store(settings)
+    if getattr(args, "require_v2", False):
+        _validate_v2_ingest_settings(settings)
+        store.ensure_v2_ready()
+    ocr = OCREngine(settings.ocr_backend)
+    visual_masker = _make_visual_masker(settings)
     deps = Deps(
         settings=settings,
         store=store,
         masker=Masker(enable_ner=settings.enable_ner, ner_model=settings.ner_model),
-        ocr=OCREngine(settings.ocr_backend),
-        embedder=make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version),
+        ocr=ocr,
+        embedder=make_embedder(
+            settings.embed_provider, settings.embed_model, settings.embed_version,
+            output_dimension=settings.embed_output_dimension,
+        ),
+        visual_masker=visual_masker,
+        visual_sanitizer=_make_visual_sanitizer(settings, ocr, visual_masker),
+        layout_analyzer=LayoutAnalyzer(settings.layout_backend),
         reprocess_statuses=FORCE_REPROCESS_STATUSES if force else set(),
     )
 
@@ -73,6 +88,42 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_v2_status(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    store = make_store(settings)
+    store.ensure_v2_ready()
+    print(json.dumps(store.multimodal_status(), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_rollback_check(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    store = make_store(settings)
+    store.ensure_v2_ready()
+    status = store.multimodal_status()
+    print(json.dumps(status, ensure_ascii=False, indent=2))
+    print("\n롤백 전환값:")
+    print("  KMU_SEARCH_RPC=hybrid_search")
+    print("  KMU_ALLOW_V1_SEARCH_FALLBACK=0")
+    legacy_models = status.get("legacy_models") or {}
+    if legacy_models:
+        model_version = max(legacy_models, key=legacy_models.get)
+        model, _, version = model_version.partition("/")
+        print(f"  KMU_EMBED_MODEL={model}")
+        print(f"  KMU_EMBED_VERSION={version}")
+    print("v2 섀도 재구축 기본값은 기존 doc_chunks 모델을 변경하지 않습니다.")
+    return 0
+
+
+def _validate_v2_ingest_settings(settings) -> None:
+    if settings.index_version != "v2":
+        raise RuntimeError("KMU_INDEX_VERSION=v2 is required")
+    if settings.embed_provider != "cohere" or settings.embed_model != "embed-v4.0":
+        raise RuntimeError("v2 rebuild requires Cohere embed-v4.0")
+    if settings.embed_output_dimension != 1024:
+        raise RuntimeError("v2 rebuild requires KMU_EMBED_OUTPUT_DIMENSION=1024")
+
+
 def cmd_backfill(args: argparse.Namespace) -> int:
     settings = load_settings()
     if args.zip_dir:
@@ -85,12 +136,20 @@ def cmd_backfill(args: argparse.Namespace) -> int:
     store = make_store(settings)
     candidates = store.list_backfill_candidates(limit=args.limit)
     passwords = load_password_dictionary(args.passwords, max_attempts=args.max_password_attempts)
+    ocr = OCREngine(settings.ocr_backend)
+    visual_masker = _make_visual_masker(settings)
     deps = Deps(
         settings=settings,
         store=store,
         masker=Masker(enable_ner=settings.enable_ner, ner_model=settings.ner_model),
-        ocr=OCREngine(settings.ocr_backend),
-        embedder=make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version),
+        ocr=ocr,
+        embedder=make_embedder(
+            settings.embed_provider, settings.embed_model, settings.embed_version,
+            output_dimension=settings.embed_output_dimension,
+        ),
+        visual_masker=visual_masker,
+        visual_sanitizer=_make_visual_sanitizer(settings, ocr, visual_masker),
+        layout_analyzer=LayoutAnalyzer(settings.layout_backend),
     )
 
     print(f"백필 후보 {len(candidates)}개 @ {settings.zip_dir} "
@@ -125,6 +184,29 @@ def cmd_stage(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_visual_masker(settings):
+    if not settings.visual_index_enabled or settings.ocr_backend == "none":
+        return None
+    return Masker(
+        enable_ner=settings.enable_ner,
+        ner_model=settings.ner_model,
+        policy=MaskPolicy.all(),
+    )
+
+
+def _make_visual_sanitizer(settings, ocr, visual_masker):
+    if visual_masker is None:
+        return None
+    return VisualSanitizer(
+        ocr,
+        max_input_bytes=settings.visual_max_input_bytes,
+        max_pixels=settings.visual_max_pixels,
+        max_side=settings.visual_max_side,
+        jpeg_quality=settings.visual_jpeg_quality,
+        verify_after_redaction=settings.visual_verify_redaction,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kmu_ingest")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -134,6 +216,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--force", action="store_true",
                    help="이미 적재된 ZIP도 재처리(파서·청킹·메타 개선 소급 적용)")
     r.set_defaults(func=cmd_run)
+    rv2 = sub.add_parser("reindex-v2", help="모든 기존 문서를 Embed v4 멀티모달 v2로 재구축")
+    rv2.add_argument("--path", help="ZIP 폴더 경로(기본 KMU_ZIP_DIR)")
+    rv2.add_argument("--dry-run", action="store_true", help="DB 미적재 사전 검증")
+    rv2.set_defaults(func=cmd_run, force=True, require_v2=True)
+    status = sub.add_parser("v2-status", help="v1/v2 문서·자산·검색 단위 전환 현황")
+    status.set_defaults(func=cmd_v2_status)
+    rollback = sub.add_parser("rollback-check", help="v1 검색 롤백 준비 상태와 전환값 확인")
+    rollback.set_defaults(func=cmd_rollback_check)
     b = sub.add_parser("backfill", help="pending_password/pending_ocr 문서만 안전하게 백필")
     b.add_argument("--zip-dir", help="원본 ZIP 폴더 경로(기본 KMU_ZIP_DIR)")
     b.add_argument("--passwords", help="비밀번호 후보 사전 파일(줄 단위, 주석 # 허용)")

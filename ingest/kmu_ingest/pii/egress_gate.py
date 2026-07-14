@@ -15,10 +15,13 @@ from .regex_rules import HIGH_RULES
 class EgressBlocked(Exception):
     """마스킹 후에도 고신뢰 PII가 남아 전송이 차단됨."""
 
-    def __init__(self, findings: list["Finding"]):
-        self.findings = findings
-        labels = ", ".join(sorted({f.label for f in findings}))
-        super().__init__(f"egress blocked: PII 잔존 ({labels}), {len(findings)}건")
+    def __init__(self, findings: list["Finding"] | None = None, *, reason: str | None = None):
+        self.findings = findings or []
+        if reason:
+            super().__init__(f"egress blocked: {reason}")
+            return
+        labels = ", ".join(sorted({f.label for f in self.findings}))
+        super().__init__(f"egress blocked: PII 잔존 ({labels}), {len(self.findings)}건")
 
 
 @dataclass

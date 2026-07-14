@@ -82,7 +82,7 @@ if [ -z "$MODEL_PROVIDER" ]; then
 fi
 
 if [ "$MODEL_PROVIDER" = "gemini" ]; then
-  MODEL_NAME="${MODEL_NAME:-gemini-2.5-flash}"
+  MODEL_NAME="${MODEL_NAME:-gemini-3.5-flash}"
   MODEL_BASE_URL="${MODEL_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}"
   MODEL_API_MODE="${MODEL_API_MODE:-chat_completions}"
 fi

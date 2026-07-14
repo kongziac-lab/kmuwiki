@@ -8,6 +8,7 @@
 - 텍스트 추출
 - 개인정보 마스킹
 - 임베딩 생성
+- PP-StructureV3·한국어 PP-OCRv5 기반 표/차트/스캔 구조 추출
 - Supabase 저장
 
 Vercel은 사용자-facing 기능 전용입니다.
@@ -23,6 +24,7 @@ Supabase는 권한과 검색 데이터의 단일 저장소입니다.
 
 - 문서 DB
 - 청크
+- 마스킹된 문서 자산과 text/table/image/mixed 검색 단위
 - 메타데이터
 - RLS 권한 관리
 - 감사 로그
@@ -54,6 +56,10 @@ Vercel 웹 앱에는 Supabase service role key를 넣지 않습니다. 웹/RAG A
 
 로컬 인제스트 PC에만 `SUPABASE_SERVICE_ROLE_KEY`를 둡니다. 원본 문서 추출, OCR, 마스킹, 임베딩 생성은 로컬에서 끝낸 뒤 결과만 Supabase에 저장합니다.
 
+멀티모달 v2에서는 원본 이미지를 저장하지 않는다. 로컬 OCR·NER·픽셀 마스킹과 재검증을
+통과한 파생본만 비공개 `kmuwiki-assets` 버킷에 저장하며, 사용자 JWT와 기존 문서 RLS를
+통과해야 다시 읽을 수 있다. 구체적인 전환 절차는 [multimodal-v2.md](multimodal-v2.md)를 따른다.
+
 ## 검증 루프
 
 운영 구조와 가드레일이 빠지지 않았는지 빠르게 점검합니다.
@@ -81,10 +87,11 @@ python -m unittest ingest.tests.test_operational_guardrails ingest.tests.test_pi
 
 1. Parser/metadata: 제목, 문서번호, 시행일, 부서, 붙임, 문서유형을 추출합니다.
 2. Chunking: 제목/문서번호/날짜/붙임 prefix를 각 청크에 붙이고 `section_type`을 기록합니다.
-3. Hybrid Search: 부서/연도 필터를 먼저 적용합니다.
-4. Cohere Rerank: 후보를 재정렬하고 실패 시 hybrid 결과로 fallback합니다.
-5. Monitoring: `access_log`에 latency, result count, rerank 적용 여부를 기록합니다.
-6. Quality Report: `evaluation/golden/search_quality_synth.jsonl` 기준 `Recall@5`, `Recall@10`, `MRR`을 추적합니다.
+3. Multimodal Embed: Cohere Embed v4의 1024차원 공간에 텍스트·표·정제 이미지를 함께 적재합니다.
+4. Hybrid Search: `search_units`에서 부서/연도 RLS 필터 후 벡터+FTS RRF를 적용합니다.
+5. Cohere Rerank v4: 마스킹된 텍스트 대리표현 후보를 재정렬하고 실패 시 hybrid 결과로 fallback합니다.
+6. Monitoring: `access_log`에 latency, result count, rerank 적용 여부를 기록합니다.
+7. Quality Report: 문서와 멀티모달 검색 단위의 `Recall@5`, `Recall@10`, `MRR`을 추적합니다.
 
 웹 빌드를 실행합니다.
 

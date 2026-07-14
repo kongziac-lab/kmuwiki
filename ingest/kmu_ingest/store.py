@@ -7,10 +7,12 @@ DryRunStore 는 DB 없이 파이프라인을 끝까지 돌려보기 위한 콘�
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from collections import Counter
 
 from .config import Settings
 from .backfill import BACKFILL_STATUSES, backfill_candidates
-from .models import Chunk, FileMeta
+from .hashing import sha256_bytes
+from .models import Chunk, DocumentAsset, FileMeta, SearchUnit
 
 
 class DryRunStore:
@@ -19,6 +21,10 @@ class DryRunStore:
     def __init__(self) -> None:
         self._zips: set[str] = set()
         self._docs: dict[str, str] = {}  # sha256 -> status
+        self._doc_ids: dict[str, str] = {}  # dryrun id -> sha256
+        self._security_levels: dict[str, str | None] = {}
+        self.assets: list[DocumentAsset] = []
+        self.search_units: list[SearchUnit] = []
 
     def zip_seen(self, sha256: str) -> bool:
         return sha256 in self._zips
@@ -30,15 +36,22 @@ class DryRunStore:
     def document_status(self, sha256: str) -> str | None:
         return self._docs.get(sha256)
 
+    def document_security_level(self, sha256: str) -> str | None:
+        return self._security_levels.get(sha256)
+
     def upsert_document(
         self, *, sha256: str, zip_id: str, meta: FileMeta, status: str,
         is_encrypted: bool = False, error: str | None = None,
     ) -> str:
         self._docs[sha256] = status
+        if meta.security_level is not None:
+            self._security_levels[sha256] = meta.security_level
         print(f"  [doc] {meta.path_in_zip} -> {status}"
               + f" (task={meta.task_category}, review={meta.review_required})"
               + (f" (enc, dept={meta.dept}, sec={meta.security_level})" if is_encrypted else ""))
-        return f"dryrun-doc-{sha256[:8]}"
+        document_id = f"dryrun-doc-{sha256[:8]}"
+        self._doc_ids[document_id] = sha256
+        return document_id
 
     def insert_chunks(
         self, document_id: str, chunks: list[Chunk],
@@ -46,8 +59,42 @@ class DryRunStore:
     ) -> None:
         print(f"  [chunks] {len(chunks)}개 임베딩 적재 (model={model}/{version}, dim={len(embeddings[0]) if embeddings else 0})")
 
+    def replace_index_v2(
+        self,
+        document_id: str,
+        assets: list[DocumentAsset],
+        units: list[SearchUnit],
+        embeddings: list[list[float]],
+        model: str,
+        version: str,
+        *,
+        visual_status: str,
+        legacy_chunks: list[Chunk] | None = None,
+        legacy_embeddings: list[list[float]] | None = None,
+    ) -> None:
+        self.assets = list(assets)
+        self.search_units = list(units)
+        sha = self._doc_ids.get(document_id)
+        if sha:
+            self._docs[sha] = "processed"
+        print(
+            f"  [v2] assets={len(assets)}, units={len(units)}, visual={visual_status}, "
+            f"model={model}/{version}, dim={len(embeddings[0]) if embeddings else 0}"
+        )
+
     def list_backfill_candidates(self, limit: int = 100):
         return []
+
+    def ensure_v2_ready(self) -> None:
+        return None
+
+    def multimodal_status(self) -> dict:
+        return {
+            "documents": {"v1": 0, "v2": len(self._docs)},
+            "assets": {"total": len(self.assets)},
+            "search_units": {"total": len(self.search_units)},
+            "legacy_models": {},
+        }
 
 
 class SupabaseStore:
@@ -59,6 +106,7 @@ class SupabaseStore:
         if not settings.supabase_url or not settings.supabase_service_key:
             raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 가 필요합니다.")
         self.c = create_client(settings.supabase_url, settings.supabase_service_key)
+        self.settings = settings
 
     def zip_seen(self, sha256: str) -> bool:
         r = self.c.table("zip_archives").select("id").eq("sha256", sha256).execute()
@@ -79,6 +127,10 @@ class SupabaseStore:
     def document_status(self, sha256: str) -> str | None:
         r = self.c.table("documents").select("status").eq("sha256", sha256).execute()
         return r.data[0]["status"] if r.data else None
+
+    def document_security_level(self, sha256: str) -> str | None:
+        r = self.c.table("documents").select("security_level").eq("sha256", sha256).execute()
+        return r.data[0].get("security_level") if r.data else None
 
     def upsert_document(
         self, *, sha256: str, zip_id: str, meta: FileMeta, status: str,
@@ -137,6 +189,189 @@ class SupabaseStore:
         if rows:
             self.c.table("doc_chunks").insert(rows).execute()
 
+    def replace_index_v2(
+        self,
+        document_id: str,
+        assets: list[DocumentAsset],
+        units: list[SearchUnit],
+        embeddings: list[list[float]],
+        model: str,
+        version: str,
+        *,
+        visual_status: str,
+        legacy_chunks: list[Chunk] | None = None,
+        legacy_embeddings: list[list[float]] | None = None,
+    ) -> None:
+        if len(units) != len(embeddings):
+            raise ValueError("search unit / embedding count mismatch")
+        if (self.settings.write_legacy_index and legacy_chunks is not None
+                and len(legacy_chunks) != len(legacy_embeddings or [])):
+            raise ValueError("legacy chunk / embedding count mismatch")
+
+        old_paths = self._existing_asset_paths(document_id)
+        uploaded_paths: set[str] = set()
+        for asset in assets:
+            if not asset.image_bytes:
+                continue
+            digest = asset.media_sha256 or sha256_bytes(asset.image_bytes)
+            asset.media_sha256 = digest
+            extension = _media_extension(asset.media_type)
+            asset.storage_path = f"{document_id}/{asset.asset_index}-{digest[:16]}.{extension}"
+            self._upload_asset(asset.storage_path, asset.image_bytes, asset.media_type)
+            uploaded_paths.add(asset.storage_path)
+
+        asset_rows = [self.asset_row(asset) for asset in assets]
+        unit_rows = [self.search_unit_row(unit, embedding, model, version)
+                     for unit, embedding in zip(units, embeddings)]
+        legacy_rows = []
+        if self.settings.write_legacy_index and legacy_chunks is not None:
+            legacy_rows = [self.legacy_chunk_row(chunk, embedding, model, version)
+                           for chunk, embedding in zip(
+                               legacy_chunks, legacy_embeddings or [])]
+        self.c.rpc("replace_document_index_v2", {
+            "target_document_id": document_id,
+            "asset_rows": asset_rows,
+            "unit_rows": unit_rows,
+            "target_visual_status": visual_status,
+            "legacy_rows": legacy_rows,
+        }).execute()
+
+        stale_paths = sorted(old_paths - uploaded_paths)
+        if stale_paths:
+            try:
+                self.c.storage.from_(self.settings.visual_asset_bucket).remove(stale_paths)
+            except Exception:
+                # Stale redacted derivatives are private and remain RLS-protected;
+                # an operational cleanup job can retry without failing ingestion.
+                pass
+
+    def _existing_asset_paths(self, document_id: str) -> set[str]:
+        try:
+            response = (
+                self.c.table("document_assets")
+                .select("storage_path")
+                .eq("document_id", document_id)
+                .execute()
+            )
+            return {row["storage_path"] for row in (response.data or []) if row.get("storage_path")}
+        except Exception:
+            return set()
+
+    def _upload_asset(self, path: str, payload: bytes, media_type: str | None) -> None:
+        bucket = self.c.storage.from_(self.settings.visual_asset_bucket)
+        options = {"content-type": media_type or "image/jpeg", "upsert": "true"}
+        bucket.upload(path=path, file=payload, file_options=options)
+
+    @staticmethod
+    def asset_row(asset: DocumentAsset) -> dict:
+        return {
+            "asset_index": asset.asset_index,
+            "asset_type": asset.asset_type,
+            "page_no": asset.page_no,
+            "bbox": list(asset.bbox) if asset.bbox else None,
+            "text_content": asset.text_content,
+            "structured_content": asset.structured_content,
+            "caption": asset.caption,
+            "storage_path": asset.storage_path,
+            "media_type": asset.media_type,
+            "media_sha256": asset.media_sha256,
+            "width": asset.width,
+            "height": asset.height,
+            "status": asset.status.value,
+            "redaction_applied": asset.redaction_applied,
+            "extraction_model": asset.extraction_model,
+            "extraction_version": asset.extraction_version,
+            "error": asset.error,
+        }
+
+    @staticmethod
+    def search_unit_row(
+        unit: SearchUnit,
+        embedding: list[float],
+        model: str,
+        version: str,
+    ) -> dict:
+        return {
+            "unit_index": unit.unit_index,
+            "asset_index": unit.asset_index,
+            "modality": unit.modality,
+            "asset_type": unit.asset_type,
+            "page_no": unit.page_no,
+            "bbox": list(unit.bbox) if unit.bbox else None,
+            "content": unit.content,
+            "embedding": embedding,
+            "token_count": unit.token_count,
+            "embed_model": model,
+            "embed_version": version,
+            "extraction_version": unit.extraction_version,
+        }
+
+    @staticmethod
+    def legacy_chunk_row(chunk: Chunk, embedding: list[float], model: str, version: str) -> dict:
+        return {
+            "chunk_index": chunk.chunk_index,
+            "content": chunk.content,
+            "embedding": embedding,
+            "token_count": chunk.token_count,
+            "embed_model": model,
+            "embed_version": version,
+            "section_type": chunk.section_type,
+        }
+
+    def ensure_v2_ready(self) -> None:
+        """Fail before a rebuild if migration 0012 is not visible."""
+        try:
+            self.c.table("document_assets").select("id").limit(1).execute()
+            self.c.table("search_units").select("id").limit(1).execute()
+            self.c.table("documents").select("id,index_version,visual_status").limit(1).execute()
+        except Exception as exc:
+            raise RuntimeError("multimodal migration 0012 is not applied") from exc
+
+    def multimodal_status(self) -> dict:
+        def count(table: str, **equals) -> int:
+            query = self.c.table(table).select("id", count="exact")
+            for key, value in equals.items():
+                query = query.eq(key, value)
+            response = query.limit(1).execute()
+            return int(getattr(response, "count", 0) or 0)
+
+        try:
+            legacy_rows = (
+                self.c.table("doc_chunks")
+                .select("embed_model,embed_version")
+                .limit(10000)
+                .execute().data or []
+            )
+            legacy_models = dict(Counter(
+                f"{row.get('embed_model') or 'unknown'}/{row.get('embed_version') or 'unknown'}"
+                for row in legacy_rows
+            ))
+        except Exception:
+            legacy_models = {}
+
+        return {
+            "documents": {
+                "v1": count("documents", index_version="v1"),
+                "v2": count("documents", index_version="v2"),
+                "processed": count("documents", status="processed"),
+            },
+            "assets": {
+                "total": count("document_assets"),
+                "ready": count("document_assets", status="ready"),
+                "pending_review": count("document_assets", status="pending_review"),
+                "pending_ocr": count("document_assets", status="pending_ocr"),
+                "blocked": count("document_assets", status="blocked"),
+            },
+            "search_units": {
+                "total": count("search_units"),
+                "text": count("search_units", modality="text"),
+                "table": count("search_units", modality="table"),
+                "image": count("search_units", modality="image"),
+                "mixed": count("search_units", modality="mixed"),
+            },
+            "legacy_models": legacy_models,
+        }
+
     def list_backfill_candidates(self, limit: int = 100):
         r = (self.c.table("documents")
              .select("id,sha256,status,path_in_zip,filename,zip_archives(filename,source_path)")
@@ -148,3 +383,7 @@ class SupabaseStore:
 
 def make_store(settings: Settings):
     return DryRunStore() if settings.dry_run else SupabaseStore(settings)
+
+
+def _media_extension(media_type: str | None) -> str:
+    return {"image/png": "png", "image/webp": "webp"}.get(media_type or "", "jpg")

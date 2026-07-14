@@ -1,6 +1,7 @@
 # KMU Wiki — 인제스트 워커 (Phase 1)
 
-전자결재 ZIP → 잠금탐지 → 파싱 → 마스킹 → **이그레스 게이트** → 임베딩 → Supabase.
+전자결재 ZIP → 잠금탐지 → 텍스트/레이아웃/OCR → 마스킹 → **이그레스 게이트** →
+Embed v4 멀티모달 인덱스 → Supabase.
 마스터 플랜의 불변식을 코드로 강제한다: [../plans/kmu-wiki-master-plan.md](../plans/kmu-wiki-master-plan.md)
 
 ## 핵심 불변식 (코드 위치)
@@ -8,7 +9,7 @@
 |---|---|
 | 1·7 마스킹 후에만 외부 전송, 게이트로 검증 | `pii/egress_gate.py`, `pipeline.py` 6단계 |
 | 2 잠긴 파일 본문 미오픈 | `lockdetect.py`, `watcher.py`, `pipeline.py` 2단계 |
-| 3·6 차원 1024 고정·모델 핀 | `config.EMBED_DIM`, `embedding.py`, `doc_chunks.embed_model` |
+| 3·6 차원 1024 고정·모델 핀 | `config.EMBED_DIM`, `embedding.py`, `search_units.embed_model` |
 | 4 해시 멱등성 | `hashing.py`, `pipeline.py` 1단계 |
 | 5·8 RLS·deny-by-default | `supabase/migrations/0001_init.sql`, `metadata.py` |
 
@@ -27,8 +28,11 @@ python -m kmu_ingest.cli run
 ```
 
 `requirements.txt`는 Vercel RAG 서비스, `requirements-api.txt`는 로컬 ASGI 서버,
-`requirements-worker.txt`는 문서 파서를 포함한 NAS 워커용 잠금 파일이다. 세 파일 모두
+`requirements-worker.txt`는 경량 NAS 워커, `requirements-visual.txt`는
+PP-StructureV3·PP-OCRv5·NER를 포함한 Mac/GPU 시각 워커용 잠금 파일이다. 파일들은
 `requirements*.in`에서 해시와 함께 재현 가능하게 생성한다.
+
+멀티모달 v2 전체 재구축은 [운영 문서](../docs/multimodal-v2.md)의 섀도 인덱스 절차를 따른다.
 
 원본 ZIP은 `./zips` 한 폴더에 계속 넣어도 된다. 워커는 하위 폴더까지 재귀적으로
 스캔하고, ZIP의 상대 경로를 `zip_archives.source_path`에 저장한다. 지식베이스 정리는
@@ -97,7 +101,7 @@ KMU_NOUS_MODEL=Hermes-4-70B
 # Google Gemini 직접 연결 — Gemini 운영 확정 시 권장
 KMU_LLM_PROVIDER=gemini
 GOOGLE_API_KEY=...
-KMU_GEMINI_MODEL=gemini-2.5-pro
+KMU_GEMINI_MODEL=gemini-3.5-flash
 
 # Vertex AI를 쓰면 프로젝트와 리전을 지정한다. 기본 리전은 서울.
 GOOGLE_GENAI_USE_VERTEXAI=1

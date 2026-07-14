@@ -1,0 +1,12 @@
+# Mac/GPU visual worker. Compile/install separately from the lightweight NAS image:
+#   uv pip compile requirements-visual.in --python-version 3.12 -o requirements-visual.txt
+-r requirements-worker.in
+
+# PP-StructureV3 document layout + Korean PP-OCRv5 recognition.
+paddleocr[doc-parser]>=3.3,<4
+paddlepaddle>=3.0,<4
+
+# Visual-derived text uses the all-PII policy; Korean NER is mandatory and the
+# pipeline quarantines the document if this local model cannot load.
+transformers>=4.45,<6
+torch>=2.4,<3

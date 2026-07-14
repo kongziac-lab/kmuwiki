@@ -22,10 +22,17 @@
 - **원본/지식베이스 분리**: 원본 ZIP은 한 폴더에 계속 넣고, 지식베이스 정리는 임베딩·업무분류 메타(`task_category`)·검토 플래그로 수행.
 - **권한**: Supabase RLS로 부서·보안등급별 강제(deny-by-default).
 - **임베딩 모델 핀**: 쿼리·문서 동일 모델(1024차원).
+- **멀티모달 v2**: PP-StructureV3/한국어 PP-OCRv5 → Cohere Embed v4 → Rerank v4.
+  원본 이미지는 로컬에만 두고 RLS가 적용된 마스킹 파생본만 사용한다.
+
+구체적인 모델, 보안 경계, NAS 연결 PC의 재구축·롤백 절차는
+[멀티모달 v2 운영 문서](docs/multimodal-v2.md)를 참고한다.
 
 ## 빠른 시작
 - 인제스트: `cd ingest && python -m kmu_ingest.cli run --path ./zips --dry-run`
 - 백필: `cd ingest && python -m kmu_ingest.cli backfill --dry-run`
+- v2 현황: `cd ingest && python -m kmu_ingest.cli v2-status`
+- v2 재구축: `cd ingest && python -m kmu_ingest.cli reindex-v2 --path <NAS-01_raw>`
 - 테스트: `cd ingest && python -m unittest discover -s tests`
 - Phase 6 정적 검증: `cd ingest && python -m kmu_verify.phase6 --out ../phase6-report.json`
 - 마스킹 평가: `cd ingest && python -m evaluation.evaluate`

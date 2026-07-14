@@ -168,7 +168,7 @@ class TestPipeline(unittest.TestCase):
         data = b"\x89PNG\r\n\x1a\n fake"
         store._docs[sha256_bytes(data)] = DocStatus.PENDING_OCR.value
         deps = Deps(
-            settings=Settings(dry_run=True, embed_provider="fake"),
+            settings=Settings(dry_run=True, embed_provider="fake", visual_index_enabled=False),
             store=store,
             masker=Masker(enable_ner=False),
             ocr=OCREngine("none"),
@@ -188,7 +188,7 @@ class TestPipeline(unittest.TestCase):
         embedder = CapturingEmbedder()
         data = b"\x89PNG\r\n\x1a\n fake"
         deps = Deps(
-            settings=Settings(dry_run=True, embed_provider="fake"),
+            settings=Settings(dry_run=True, embed_provider="fake", visual_index_enabled=False),
             store=store,
             masker=Masker(enable_ner=False),
             ocr=OCREngine("none"),

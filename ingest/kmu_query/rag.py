@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import base64
 import os
 
 from .retriever import Source
+from .visual_assets import VisualInput
 from .verification import VerificationMemo, build_verification_memo
 
 REFUSAL = "제공된 자료에서 관련 내용을 찾지 못했습니다. 질문을 더 구체화하거나 권한 범위를 확인해 주세요."
@@ -44,7 +46,9 @@ def _group_sources(sources: list[Source]) -> list[Source]:
     """같은 문서의 여러 청크를 하나의 인용 번호로 합친다."""
     grouped: dict[str, Source] = {}
     for s in sources:
-        key = s.label() if (s.citation_filename or s.citation_doc_no) else s.document_id
+        base_key = s.label() if (s.citation_filename or s.citation_doc_no) else s.document_id
+        key = (f"{base_key}:p{s.page_no or 0}:{s.asset_type or s.modality}"
+               if s.modality != "text" or s.page_no else base_key)
         existing = grouped.get(key)
         content = s.content.strip()
         if existing is None:
@@ -61,6 +65,14 @@ def _group_sources(sources: list[Source]) -> list[Source]:
                 citation_doc_no=s.citation_doc_no,
                 citation_doc_date=s.citation_doc_date,
                 citation_dept=s.citation_dept,
+                zip_id=s.zip_id,
+                search_unit_id=s.search_unit_id,
+                asset_id=s.asset_id,
+                modality=s.modality,
+                asset_type=s.asset_type,
+                page_no=s.page_no,
+                bbox=s.bbox,
+                storage_path=s.storage_path,
             )
         elif content and content not in existing.content:
             existing.content = f"{existing.content}\n\n{content}".strip()
@@ -71,7 +83,7 @@ def build_context(sources: list[Source]) -> str:
     """검색 결과를 번호 매긴 컨텍스트 블록으로."""
     blocks = []
     for i, s in enumerate(_group_sources(sources), start=1):
-        blocks.append(f"[{i}] ({s.label()})\n{s.content.strip()}")
+        blocks.append(f"[{i}] ({_citation_label(s)})\n{s.content.strip()}")
     return "\n\n".join(blocks)
 
 
@@ -85,7 +97,7 @@ def citations(sources: list[Source]) -> list[dict]:
     return [{
         "n": i,
         "document_id": s.document_id,
-        "label": s.label(),
+        "label": _citation_label(s),
         "filename": s.filename,
         "doc_no": s.doc_no,
         "doc_date": s.doc_date,
@@ -93,7 +105,21 @@ def citations(sources: list[Source]) -> list[dict]:
         "citation_doc_no": s.citation_doc_no,
         "citation_doc_date": s.citation_doc_date,
         "citation_dept": s.citation_dept,
+        "search_unit_id": s.search_unit_id,
+        "asset_id": s.asset_id,
+        "modality": s.modality,
+        "asset_type": s.asset_type,
+        "page_no": s.page_no,
+        "bbox": s.bbox,
     } for i, s in enumerate(_group_sources(sources), start=1)]
+
+
+def _citation_label(source: Source) -> str:
+    locator = " · ".join(value for value in (
+        f"p.{source.page_no}" if source.page_no else "",
+        source.asset_type or (source.modality if source.modality != "text" else ""),
+    ) if value)
+    return f"{source.label()} · {locator}" if locator else source.label()
 
 
 def answer(query: str, sources: list[Source], client=None,
@@ -149,7 +175,8 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
                   anthropic_key: str | None = None, cohere_key: str | None = None,
                   nous_key: str | None = None, nous_base_url: str | None = None,
                   gemini_key: str | None = None, gemini_use_vertex: bool = False,
-                  gemini_project: str | None = None, gemini_location: str | None = None):
+                  gemini_project: str | None = None, gemini_location: str | None = None,
+                  visual_inputs: list[VisualInput] | None = None):
     """답변 토큰 스트리밍(제공자 무관). 출처 없으면 LLM 호출 없이 거절 1회.
 
     provider: "anthropic"(Claude) | "cohere"(command-r) | "nous"(OpenAI 호환 aggregator)
@@ -170,6 +197,7 @@ def stream_answer(query: str, sources: list[Source], *, provider: str, model: st
         nous_key=nous_key, nous_base_url=nous_base_url,
         gemini_key=gemini_key, gemini_use_vertex=gemini_use_vertex,
         gemini_project=gemini_project, gemini_location=gemini_location,
+        visual_inputs=visual_inputs,
     )
 
 
@@ -218,7 +246,8 @@ def _stream_provider(*, provider: str, model: str, system: str, prompt: str, max
                      anthropic_key: str | None = None, cohere_key: str | None = None,
                      nous_key: str | None = None, nous_base_url: str | None = None,
                      gemini_key: str | None = None, gemini_use_vertex: bool = False,
-                     gemini_project: str | None = None, gemini_location: str | None = None):
+                     gemini_project: str | None = None, gemini_location: str | None = None,
+                     visual_inputs: list[VisualInput] | None = None):
     """제공자별 스트리밍 스위치(system+prompt 공통). 답변·요약이 공유한다.
 
     Gemini 는 thinking 토큰이 max_output_tokens 를 먼저 소비하므로 항상 GEMINI_MAX_OUTPUT_TOKENS
@@ -230,9 +259,22 @@ def _stream_provider(*, provider: str, model: str, system: str, prompt: str, max
             api_key=anthropic_key or None,
             timeout=PROVIDER_TIMEOUT_SECONDS,
         )
+        user_content = prompt
+        if visual_inputs:
+            user_content = [{"type": "text", "text": prompt}]
+            for visual in visual_inputs:
+                user_content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": visual.media_type,
+                        "data": base64.b64encode(visual.data).decode("ascii"),
+                    },
+                })
+                user_content.append({"type": "text", "text": f"시각 자료: {visual.label}"})
         with client.messages.stream(
             model=model, max_tokens=max_tokens, system=system,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": user_content}],
         ) as stream:
             yield from stream.text_stream
 
@@ -277,9 +319,16 @@ def _stream_provider(*, provider: str, model: str, system: str, prompt: str, max
         client_kwargs["http_options"] = {"timeout": int(PROVIDER_TIMEOUT_SECONDS * 1000)}
         client = genai.Client(**{k: v for k, v in client_kwargs.items() if v is not None})
         try:
+            contents = prompt
+            if visual_inputs:
+                contents = [prompt]
+                for visual in visual_inputs:
+                    contents.append(types.Part.from_bytes(
+                        data=visual.data, mime_type=visual.media_type))
+                    contents.append(f"시각 자료: {visual.label}")
             stream = client.models.generate_content_stream(
                 model=model,
-                contents=prompt,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system,
                     max_output_tokens=max(max_tokens, GEMINI_MAX_OUTPUT_TOKENS),

@@ -21,6 +21,25 @@ class TestSecurityMigration(unittest.TestCase):
         self.assertIn("cron.schedule", sql)
         self.assertIn("delete from public.access_log", sql)
 
+    def test_multimodal_v2_preserves_document_authority_and_rls(self):
+        sql = (ROOT / "supabase/migrations/0012_multimodal_v2.sql").read_text(
+            encoding="utf-8",
+        ).lower()
+
+        self.assertIn("create table if not exists document_assets", sql)
+        self.assertIn("create table if not exists search_units", sql)
+        self.assertIn("embedding          vector(1024) not null", sql)
+        self.assertIn("alter table document_assets enable row level security", sql)
+        self.assertIn("alter table search_units enable row level security", sql)
+        self.assertIn("d.security_level = '일반'", sql)
+        self.assertIn("d.status = 'processed'", sql)
+        self.assertIn("'kmuwiki-assets', 'kmuwiki-assets', false", sql)
+        self.assertIn("create or replace function replace_document_index_v2", sql)
+        self.assertIn("grant execute on function replace_document_index_v2", sql)
+        self.assertIn("to service_role", sql)
+        self.assertIn("create or replace function hybrid_search_v2", sql)
+        self.assertNotIn("drop table doc_chunks", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

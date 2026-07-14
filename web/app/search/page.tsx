@@ -16,6 +16,12 @@ type SearchSource = {
   citation_doc_no?: string | null;
   citation_doc_date?: string | null;
   citation_dept?: string | null;
+  search_unit_id?: string | null;
+  asset_id?: string | null;
+  modality?: "text" | "table" | "image" | "mixed";
+  asset_type?: string | null;
+  page_no?: number | null;
+  bbox?: number[] | null;
 };
 
 export default function SearchPage() {
@@ -127,11 +133,18 @@ function Search({ email, onLogout }: { email: string; onLogout: () => void }) {
       {resultCount > 0 && <p style={{ color: "#9aa6d6", fontSize: 13, marginTop: 16 }}>{resultCount}개 결과</p>}
       <ol style={{ listStyle: "none", margin: "16px 0 0", padding: 0, display: "grid", gap: 12 }}>
         {results.map((source, idx) => (
-          <li key={`${source.document_id}-${source.chunk_index}`} style={resultBox}>
+          <li key={source.search_unit_id ?? `${source.document_id}-${source.chunk_index}`} style={resultBox}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
               <strong>{idx + 1}. {label(source)}</strong>
               <span style={{ color: "#6f7aa8", fontSize: 12 }}>{source.score.toFixed(4)}</span>
             </div>
+            {(source.modality && source.modality !== "text") || source.page_no ? (
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {source.page_no ? <span className="pill">p.{source.page_no}</span> : null}
+                {source.asset_type ? <span className="pill">{source.asset_type}</span> : null}
+                {source.modality && source.modality !== "text" ? <span className="pill">{source.modality}</span> : null}
+              </div>
+            ) : null}
             <p style={{ color: "#c7d0f0", lineHeight: 1.6, margin: "8px 0 0" }}>{excerpt(source.content)}</p>
             <details style={{ marginTop: 8 }}>
               <summary style={{ cursor: "pointer", color: "#c7d0f0", fontSize: 13 }}>마스킹 청크 보기</summary>

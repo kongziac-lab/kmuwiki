@@ -189,7 +189,7 @@ class TestRetriever(unittest.TestCase):
             year=2026,
         )
 
-        self.assertEqual(client.captured["name"], "hybrid_search")
+        self.assertEqual(client.captured["name"], "hybrid_search_v2")
         self.assertEqual(client.captured["params"]["filter_dept"], "Planning")
         self.assertEqual(client.captured["params"]["filter_year"], 2026)
         self.assertEqual(client.captured["params"]["match_count"], 5)
@@ -203,7 +203,7 @@ class TestRetriever(unittest.TestCase):
         }])
         r = Retriever(client, FakeEmbedder())
         out = r.retrieve("행사 일정", k=5, dept="기획처")
-        self.assertEqual(client.captured["name"], "hybrid_search")
+        self.assertEqual(client.captured["name"], "hybrid_search_v2")
         self.assertEqual(client.captured["params"]["filter_dept"], "기획처")
         self.assertEqual(client.captured["params"]["match_count"], 5)
         self.assertEqual(len(client.captured["params"]["query_embedding"]), 1024)

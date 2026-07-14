@@ -54,6 +54,87 @@ class Chunk:
     section_type: str | None = None
 
 
+class AssetStatus(str, Enum):
+    """Derived visual/structured asset processing state.
+
+    Asset state is deliberately independent from ``DocStatus``: a document can
+    be searchable through masked text while its visual derivative waits for a
+    reviewed security level or a local OCR/redaction worker.
+    """
+
+    READY = "ready"
+    METADATA_ONLY = "metadata_only"
+    PENDING_REVIEW = "pending_review"
+    PENDING_OCR = "pending_ocr"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+
+
+@dataclass
+class ParsedAsset:
+    """Raw, local-only asset emitted by a document parser.
+
+    ``image_bytes`` must never be sent to an external provider or persisted in
+    Supabase.  The visual sanitizer converts it into a redacted derivative
+    first.  Text fields are also raw until the pipeline applies Masker.
+    """
+
+    asset_type: str
+    page_no: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    text: str = ""
+    structured_content: str = ""
+    caption: str = ""
+    image_bytes: bytes | None = field(default=None, repr=False)
+    media_type: str | None = None
+    width: int | None = None
+    height: int | None = None
+    needs_ocr: bool = False
+    extraction_model: str | None = None
+    extraction_version: str | None = None
+
+
+@dataclass
+class DocumentAsset:
+    """Masked/redacted asset ready for v2 persistence."""
+
+    asset_index: int
+    asset_type: str
+    page_no: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    text_content: str = ""
+    structured_content: str = ""
+    caption: str = ""
+    image_bytes: bytes | None = field(default=None, repr=False)  # redacted derivative only
+    media_type: str | None = None
+    media_sha256: str | None = None
+    width: int | None = None
+    height: int | None = None
+    status: AssetStatus = AssetStatus.METADATA_ONLY
+    redaction_applied: bool = False
+    extraction_model: str | None = None
+    extraction_version: str | None = None
+    error: str | None = None
+    storage_path: str | None = None
+
+
+@dataclass
+class SearchUnit:
+    """A text, structured, image, or mixed retrieval unit."""
+
+    unit_index: int
+    content: str                  # masked text/YAML surrogate
+    modality: str = "text"       # text|table|image|mixed
+    asset_index: int | None = None
+    asset_type: str | None = None
+    page_no: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    token_count: int | None = None
+    extraction_version: str | None = None
+    image_bytes: bytes | None = field(default=None, repr=False)  # redacted derivative only
+    media_type: str | None = None
+
+
 @dataclass
 class DocumentRecord:
     """파이프라인이 다루는 한 문서의 작업 상태."""
@@ -67,5 +148,7 @@ class DocumentRecord:
     meta: FileMeta | None = None
     masked_text: str | None = None
     chunks: list[Chunk] = field(default_factory=list)
+    assets: list[DocumentAsset] = field(default_factory=list)
+    search_units: list[SearchUnit] = field(default_factory=list)
     error: str | None = None
     processed_at: datetime | None = None

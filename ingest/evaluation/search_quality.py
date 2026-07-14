@@ -21,6 +21,8 @@ class SearchCase:
     query: str
     relevant_ids: tuple[str, ...]
     retrieved_ids: tuple[str, ...] = ()
+    relevant_unit_ids: tuple[str, ...] = ()
+    retrieved_unit_ids: tuple[str, ...] = ()
     dept: str | None = None
     year: int | None = None
     intent: str = "general"
@@ -31,11 +33,17 @@ class SearchMetrics:
     count: int
     recall_at: dict[int, float]
     mrr: float
+    unit_count: int = 0
+    unit_recall_at: dict[int, float] = field(default_factory=dict)
+    unit_mrr: float = 0.0
     misses: list[dict] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
-        return self.recall_at.get(5, 0.0) >= 0.80 and self.recall_at.get(10, 0.0) >= 0.90
+        document_gate = (self.recall_at.get(5, 0.0) >= 0.80
+                         and self.recall_at.get(10, 0.0) >= 0.90)
+        unit_gate = not self.unit_count or self.unit_recall_at.get(5, 0.0) >= 0.80
+        return document_gate and unit_gate
 
 
 def load_cases(path: str | Path) -> list[SearchCase]:
@@ -51,6 +59,8 @@ def load_cases(path: str | Path) -> list[SearchCase]:
                 query=str(row["query"]),
                 relevant_ids=tuple(str(v) for v in row.get("relevant_ids", [])),
                 retrieved_ids=tuple(str(v) for v in row.get("retrieved_ids", [])),
+                relevant_unit_ids=tuple(str(v) for v in row.get("relevant_unit_ids", [])),
+                retrieved_unit_ids=tuple(str(v) for v in row.get("retrieved_unit_ids", [])),
                 dept=row.get("dept"),
                 year=row.get("year"),
                 intent=row.get("intent") or "general",
@@ -65,6 +75,9 @@ def evaluate_cases(cases: list[SearchCase], ks: tuple[int, ...] = (5, 10)) -> Se
     recall_hits = {k: 0 for k in ks}
     reciprocal_ranks: list[float] = []
     misses: list[dict] = []
+    unit_hits = {k: 0 for k in ks}
+    unit_rr: list[float] = []
+    unit_count = 0
 
     for case in cases:
         relevant = set(case.relevant_ids)
@@ -81,11 +94,24 @@ def evaluate_cases(cases: list[SearchCase], ks: tuple[int, ...] = (5, 10)) -> Se
                 "relevant_ids": sorted(relevant),
                 "retrieved_ids": retrieved[:max(ks)],
             })
+        if case.relevant_unit_ids:
+            unit_count += 1
+            relevant_units = set(case.relevant_unit_ids)
+            retrieved_units = list(case.retrieved_unit_ids)
+            unit_rank = next((i + 1 for i, unit_id in enumerate(retrieved_units)
+                              if unit_id in relevant_units), None)
+            unit_rr.append(1.0 / unit_rank if unit_rank else 0.0)
+            for k in ks:
+                if relevant_units.intersection(retrieved_units[:k]):
+                    unit_hits[k] += 1
 
     return SearchMetrics(
         count=len(cases),
         recall_at={k: recall_hits[k] / len(cases) for k in ks},
         mrr=mean(reciprocal_ranks),
+        unit_count=unit_count,
+        unit_recall_at={k: unit_hits[k] / unit_count for k in ks} if unit_count else {},
+        unit_mrr=mean(unit_rr) if unit_rr else 0.0,
         misses=misses,
     )
 
@@ -96,6 +122,8 @@ def format_metrics(metrics: SearchMetrics) -> str:
         f"cases: {metrics.count}",
         *(f"Recall@{k}: {v:.3f}" for k, v in sorted(metrics.recall_at.items())),
         f"MRR: {metrics.mrr:.3f}",
+        *(f"Unit Recall@{k}: {v:.3f}" for k, v in sorted(metrics.unit_recall_at.items())),
+        *( [f"Unit MRR: {metrics.unit_mrr:.3f}"] if metrics.unit_count else []),
         f"Gate: {'PASS' if metrics.passed else 'FAIL'}",
     ]
     if metrics.misses:
@@ -120,6 +148,9 @@ def main(argv: list[str] | None = None) -> int:
             "count": metrics.count,
             "recall_at": metrics.recall_at,
             "mrr": metrics.mrr,
+            "unit_count": metrics.unit_count,
+            "unit_recall_at": metrics.unit_recall_at,
+            "unit_mrr": metrics.unit_mrr,
             "passed": metrics.passed,
             "misses": metrics.misses,
         }
