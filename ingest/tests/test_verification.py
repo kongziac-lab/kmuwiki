@@ -85,6 +85,8 @@ class TestVerificationMode(unittest.TestCase):
 
         memo = build_verification_memo("행사는 언제 개최되나?", sources)
 
+        self.assertIn("## 한눈에 보기", memo.deterministic_answer or "")
+        self.assertIn("| 구분 | 근거 문서 | 확인 내용 | 근거 |", memo.deterministic_answer or "")
         self.assertIn("일시: 2026. 7. 15", memo.deterministic_answer or "")
         self.assertNotIn("단정할 수 없습니다", memo.deterministic_answer or "")
 
@@ -156,6 +158,8 @@ class TestVerificationMode(unittest.TestCase):
         memo = build_verification_memo("주부산중국총영사관 관련 일정은 어떻게 되나", sources)
 
         self.assertEqual(memo.query_type, "date")
+        self.assertIn("## 확인된 내용", memo.deterministic_answer or "")
+        self.assertIn("| 구분 | 근거 문서 | 확인 내용 | 근거 |", memo.deterministic_answer or "")
         self.assertIn("2026. 5. 30", memo.deterministic_answer or "")
         self.assertIn("2026. 3. 24", memo.deterministic_answer or "")
 

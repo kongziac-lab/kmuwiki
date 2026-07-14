@@ -285,7 +285,7 @@ def _date_answer_from_event_hits(
     form_hits: list[tuple[int, str]],
 ) -> str:
     seen: set[tuple[int, str]] = set()
-    lines = []
+    rows = []
     for idx, sentence, label in event_hits:
         summary = _event_date_summary(sentence)
         key = (idx, _primary_date(summary) or summary)
@@ -293,15 +293,43 @@ def _date_answer_from_event_hits(
             continue
         seen.add(key)
         source_title = _source_title(label)
-        lines.append(f"{source_title}: {summary} [{idx}]")
-        if len(lines) >= 5:
+        rows.append((source_title, summary, idx))
+        if len(rows) >= 5:
             break
-    form = " 개최형식은 서면결의입니다." if form_hits else ""
-    if len(lines) == 1:
-        return f"자료에서 확인되는 일시는 다음 근거입니다: {lines[0]}.{form}"
-    return f"자료에서 확인되는 일정은 다음과 같습니다. " + " ".join(
-        f"{i + 1}. {line}" for i, line in enumerate(lines)
-    ) + form
+
+    overview = (
+        f"자료에서 확인되는 일시는 1건입니다 [{rows[0][2]}]."
+        if len(rows) == 1
+        else f"자료에서 확인되는 일정은 {len(rows)}건입니다."
+    )
+    if form_hits:
+        overview += f" 개최형식은 서면결의로 확인됩니다 [{form_hits[0][0]}]."
+
+    table = [
+        "| 구분 | 근거 문서 | 확인 내용 | 근거 |",
+        "|---|---|---|---|",
+    ]
+    for number, (source_title, summary, idx) in enumerate(rows, 1):
+        table.append(
+            "| "
+            + " | ".join((
+                f"{number}",
+                _markdown_table_cell(source_title),
+                _markdown_table_cell(summary),
+                f"[{idx}]",
+            ))
+            + " |"
+        )
+
+    caution = "- 문서일자·결재일·관련문서일은 실제 행사일시와 다를 수 있으므로 본문에 명시된 일정 근거를 우선했습니다."
+    if form_hits:
+        caution += "\n- 서면결의 여부는 일정과 별도 속성으로 보아야 합니다."
+
+    return "\n\n".join((
+        "## 한눈에 보기\n" + overview,
+        "## 확인된 내용\n" + "\n".join(table),
+        "## 주의할 점\n" + caution,
+    ))
 
 
 def _date_answer_without_event_hit(
@@ -309,14 +337,26 @@ def _date_answer_without_event_hit(
     form_hits: list[tuple[int, str]],
     doc_dates: list[tuple[int, str, str]],
 ) -> str:
-    bits = []
+    overview = "자료 본문에서 별도의 개최일시 또는 행사일시는 확인되지 않습니다."
+    rows = [
+        "| 항목 | 확인 내용 | 근거 |",
+        "|---|---|---|",
+    ]
     if "개최" in query and form_hits:
-        bits.append(f"관련 문서에서 개최형식은 서면결의로 확인됩니다 [{form_hits[0][0]}].")
+        rows.append(f"| 개최형식 | 서면결의 | [{form_hits[0][0]}] |")
     if doc_dates:
         idx, date, _label = doc_dates[0]
-        bits.append(f"대표 문서의 문서일자는 {date}입니다 [{idx}].")
-    bits.append("다만 자료 본문에 별도의 개최일시 또는 행사일시는 명시되어 있지 않아, 문서일자를 실제 개최일로 단정할 수 없습니다.")
-    return " ".join(bits)
+        rows.append(f"| 문서일자 | {date} | [{idx}] |")
+
+    caution = (
+        "- 문서일자는 행정 문서의 작성·시행 기준일일 수 있어 실제 개최일로 단정할 수 없습니다.\n"
+        "- 최종 일정 확인이 필요하면 원문 또는 붙임 자료의 행사일시 항목을 확인해야 합니다."
+    )
+    return "\n\n".join((
+        "## 한눈에 보기\n" + overview,
+        "## 확인된 내용\n" + "\n".join(rows),
+        "## 주의할 점\n" + caution,
+    ))
 
 
 def _date_uncertain_notes(
@@ -364,6 +404,10 @@ def _primary_date(text: str) -> str | None:
 
 def _source_title(label: str) -> str:
     return label.split(" · ")[-1] if label else "자료"
+
+
+def _markdown_table_cell(value: str) -> str:
+    return _compact(value).replace("|", "\\|")
 
 
 def _group_for_citations(sources: list[Source]) -> list[Source]:
