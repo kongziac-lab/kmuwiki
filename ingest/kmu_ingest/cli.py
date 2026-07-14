@@ -45,6 +45,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     if getattr(args, "require_v2", False):
         _validate_v2_ingest_settings(settings)
         store.ensure_v2_ready()
+        if not settings.dry_run:
+            source_report = store.source_archive_report(settings.zip_dir)
+            if source_report["missing"] or source_report["unsafe"]:
+                print("v2 재색인 중단: DB에 등록된 원본 ZIP이 모두 필요합니다.", file=sys.stderr)
+                print(json.dumps(source_report, ensure_ascii=False, indent=2), file=sys.stderr)
+                return 2
     ocr = OCREngine(settings.ocr_backend)
     visual_masker = _make_visual_masker(settings)
     deps = Deps(
@@ -113,6 +119,106 @@ def cmd_rollback_check(args: argparse.Namespace) -> int:
         print(f"  KMU_EMBED_VERSION={version}")
     print("v2 섀도 재구축 기본값은 기존 doc_chunks 모델을 변경하지 않습니다.")
     return 0
+
+
+def evaluate_cutover(
+    status: dict,
+    *,
+    expected_source_archives: int,
+    minimum_total_documents: int,
+    minimum_v2_documents: int,
+    embed_model: str,
+    embed_version: str,
+) -> dict:
+    """운영 전환의 데이터·모델·보안 불변식을 기계적으로 판정한다."""
+    failures: list[str] = []
+    warnings: list[str] = []
+    sources = status.get("source_archives") or {}
+    documents = status.get("documents") or {}
+    assets = status.get("assets") or {}
+    units = status.get("search_units") or {}
+    integrity = status.get("integrity") or {}
+    legacy_models = status.get("legacy_models") or {}
+
+    if int(sources.get("total") or 0) != expected_source_archives:
+        failures.append(
+            f"원본 ZIP 기준 불일치: expected={expected_source_archives}, "
+            f"actual={int(sources.get('total') or 0)}")
+    if int(documents.get("total") or 0) < minimum_total_documents:
+        failures.append(
+            f"문서 기준 미달: minimum={minimum_total_documents}, "
+            f"actual={int(documents.get('total') or 0)}")
+    if int(documents.get("v2") or 0) < minimum_v2_documents:
+        failures.append(
+            f"v2 문서 기준 미달: minimum={minimum_v2_documents}, "
+            f"actual={int(documents.get('v2') or 0)}")
+    if int(documents.get("processed_v1") or 0):
+        failures.append(
+            f"기존 검색 가능 문서가 v1에 남아 있음: {documents['processed_v1']}개")
+    if int(documents.get("processed") or 0) != int(documents.get("v2") or 0):
+        failures.append(
+            "processed 문서 수와 v2 문서 수가 달라 부분 전환 상태임")
+
+    unit_total = int(units.get("total") or 0)
+    if unit_total <= 0:
+        failures.append("v2 검색 단위가 0개임")
+    if int(integrity.get("v2_without_search_units") or 0):
+        failures.append(
+            "검색 단위가 없는 v2 문서가 있음: "
+            f"{integrity['v2_without_search_units']}개")
+    if int(integrity.get("legacy_documents_without_v2") or 0):
+        failures.append(
+            "기존 검색 가능 문서 중 v2로 재구축되지 않은 문서가 있음: "
+            f"{integrity['legacy_documents_without_v2']}개")
+    expected_model = f"{embed_model}/{embed_version}"
+    models = units.get("models") or {}
+    if set(models) != {expected_model} or int(models.get(expected_model) or 0) != unit_total:
+        failures.append(
+            f"v2 임베딩 모델 혼합 또는 핀 불일치: expected={expected_model}, actual={models}")
+
+    if int(integrity.get("ready_without_storage") or 0):
+        failures.append("ready 시각 자산 중 Storage 경로가 없는 항목이 있음")
+    if int(integrity.get("ready_without_redaction") or 0):
+        failures.append("ready 시각 자산 중 마스킹 확인이 없는 항목이 있음")
+    if not legacy_models:
+        failures.append("즉시 롤백할 기존 doc_chunks 인덱스가 없음")
+    elif len(legacy_models) != 1:
+        failures.append(f"롤백 인덱스의 임베딩 모델이 혼합됨: {legacy_models}")
+
+    for key in ("pending_review", "pending_ocr", "blocked", "failed"):
+        value = int(assets.get(key) or 0)
+        if value:
+            warnings.append(f"시각 자산 {key}: {value}개 (검색에는 안전한 대체 표현만 사용)")
+
+    return {
+        "ready": not failures,
+        "failures": failures,
+        "warnings": warnings,
+        "expected": {
+            "source_archives": expected_source_archives,
+            "minimum_total_documents": minimum_total_documents,
+            "minimum_v2_documents": minimum_v2_documents,
+            "embed_model": expected_model,
+        },
+    }
+
+
+def cmd_cutover_check(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    _validate_v2_ingest_settings(settings)
+    store = make_store(settings)
+    store.ensure_v2_ready()
+    status = store.multimodal_status()
+    report = evaluate_cutover(
+        status,
+        expected_source_archives=args.expected_source_archives,
+        minimum_total_documents=args.minimum_total_documents,
+        minimum_v2_documents=args.minimum_v2_documents,
+        embed_model=settings.embed_model,
+        embed_version=settings.embed_version,
+    )
+    print(json.dumps({"cutover": report, "status": status}, ensure_ascii=False, indent=2))
+    return 0 if report["ready"] else 2
 
 
 def _validate_v2_ingest_settings(settings) -> None:
@@ -224,6 +330,15 @@ def main(argv: list[str] | None = None) -> int:
     status.set_defaults(func=cmd_v2_status)
     rollback = sub.add_parser("rollback-check", help="v1 검색 롤백 준비 상태와 전환값 확인")
     rollback.set_defaults(func=cmd_rollback_check)
+    cutover = sub.add_parser(
+        "cutover-check", help="v2 데이터·모델·보안 완전성 검사(성공할 때만 RPC 전환)")
+    cutover.add_argument("--expected-source-archives", type=int, required=True,
+                         help="재색인 시작 전에 확인한 등록 원본 ZIP 수")
+    cutover.add_argument("--minimum-total-documents", type=int, required=True,
+                         help="재색인 전 documents 최소 기준")
+    cutover.add_argument("--minimum-v2-documents", type=int, required=True,
+                         help="재색인 전 검색 가능 문서 수 이상의 v2 기준")
+    cutover.set_defaults(func=cmd_cutover_check)
     b = sub.add_parser("backfill", help="pending_password/pending_ocr 문서만 안전하게 백필")
     b.add_argument("--zip-dir", help="원본 ZIP 폴더 경로(기본 KMU_ZIP_DIR)")
     b.add_argument("--passwords", help="비밀번호 후보 사전 파일(줄 단위, 주석 # 허용)")

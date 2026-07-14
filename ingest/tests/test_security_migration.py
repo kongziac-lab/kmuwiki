@@ -40,6 +40,20 @@ class TestSecurityMigration(unittest.TestCase):
         self.assertIn("create or replace function hybrid_search_v2", sql)
         self.assertNotIn("drop table doc_chunks", sql)
 
+    def test_multimodal_query_rpc_bounds_direct_authenticated_calls(self):
+        sql = (ROOT / "supabase/migrations/0013_multimodal_v2_query_bounds.sql").read_text(
+            encoding="utf-8",
+        ).lower()
+
+        self.assertIn("safe_match_count", sql)
+        self.assertIn("safe_pool", sql)
+        self.assertIn("safe_rrf_k", sql)
+        self.assertIn("safe_query_text", sql)
+        self.assertIn("left(coalesce(query_text, ''), 2000)", sql)
+        self.assertIn("where query_embedding is not null", sql)
+        self.assertIn("grant execute on function hybrid_search_v2", sql)
+        self.assertIn("to authenticated", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

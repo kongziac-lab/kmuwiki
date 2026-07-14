@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from kmu_ingest.config import Settings
 from kmu_ingest.metadata import build_file_meta
-from kmu_ingest.models import Chunk, SearchUnit
+from kmu_ingest.models import AssetStatus, Chunk, DocumentAsset, SearchUnit
 from kmu_ingest.store import SupabaseStore
 
 
@@ -57,6 +57,42 @@ class _Client:
         return _Query(self)
 
 
+class _Bucket:
+    def __init__(self):
+        self.uploaded = []
+        self.removed = []
+
+    def upload(self, *, path, file, file_options):
+        self.uploaded.append((path, file, file_options))
+
+    def remove(self, paths):
+        self.removed.extend(paths)
+
+
+class _Storage:
+    def __init__(self, bucket):
+        self.bucket = bucket
+
+    def from_(self, _name):
+        return self.bucket
+
+
+class _FailingRPCQuery(_Query):
+    def execute(self):
+        raise RuntimeError("database transaction failed")
+
+
+class _FailingRPCClient(_Client):
+    def __init__(self):
+        super().__init__()
+        self.bucket = _Bucket()
+        self.storage = _Storage(self.bucket)
+
+    def rpc(self, name, params):
+        self.rpc_call = (name, params)
+        return _FailingRPCQuery(self)
+
+
 class TestAtomicV2Store(unittest.TestCase):
     def test_v2_and_rollback_chunks_share_one_rpc_transaction(self):
         store = SupabaseStore.__new__(SupabaseStore)
@@ -80,6 +116,29 @@ class TestAtomicV2Store(unittest.TestCase):
         self.assertEqual(name, "replace_document_index_v2")
         self.assertEqual(params["legacy_rows"][0]["embed_model"], "embed-v4.0")
         self.assertEqual(len(params["legacy_rows"][0]["embedding"]), 1024)
+
+    def test_new_derivative_is_removed_when_atomic_rpc_fails(self):
+        store = SupabaseStore.__new__(SupabaseStore)
+        store.c = _FailingRPCClient()
+        store.settings = Settings(write_legacy_index=False)
+        asset = DocumentAsset(
+            asset_index=0,
+            asset_type="page",
+            image_bytes=b"redacted-only",
+            media_type="image/jpeg",
+            status=AssetStatus.READY,
+            redaction_applied=True,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "database transaction failed"):
+            store.replace_index_v2(
+                "doc-id", [asset], [SearchUnit(0, "검색 본문")],
+                [[0.0] * 1024], "embed-v4.0", "v4.0-1024",
+                visual_status="ready",
+            )
+
+        self.assertEqual(len(store.c.bucket.uploaded), 1)
+        self.assertEqual(store.c.bucket.removed, [asset.storage_path])
 
 
 if __name__ == "__main__":

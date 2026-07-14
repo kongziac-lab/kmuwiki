@@ -37,7 +37,8 @@
   따라서 구축 중에는 기존 검색을 유지할 수 있고, 전환 실패 시 RPC와 임베딩 모델을 함께 v1/v3로
   되돌릴 수 있다.
 
-2026-07-15 현재 원격 Supabase에는 마이그레이션 `0012`가 적용되어 있다. 현황은
+2026-07-15 현재 원격 Supabase에는 마이그레이션 `0012`와 질의 한도를 보강한 `0013`이
+적용되어 있다. 현황은
 `documents: v1=78, v2=0`, 기존 `doc_chunks=163`이며 모델은
 `embed-multilingual-v3.0/v3`이다. 이 작업 PC에는 전체 원본 ZIP이 연결되어 있지 않아 실제
 재인덱싱은 NAS 원본을 볼 수 있는 컴퓨터에서 이어서 실행한다.
@@ -62,16 +63,26 @@ set +a
 python -m kmu_ingest.cli v2-status
 python -m kmu_ingest.cli reindex-v2 --path "$KMU_ZIP_DIR"
 python -m kmu_ingest.cli v2-status
+python -m kmu_ingest.cli cutover-check \
+  --expected-source-archives 22 \
+  --minimum-total-documents 78 \
+  --minimum-v2-documents 71
 ```
 
 첫 실행에는 PP-StructureV3, PP-OCRv5, 한국어 NER 모델 다운로드 시간이 든다. 원본 경로는
-읽기 전용 마운트를 권장한다. 재구축 종료 후 다음 조건을 확인한다.
+읽기 전용 마운트를 권장한다. `reindex-v2`는 DB에 등록된 원본 ZIP 22개를 지정한 루트에서
+먼저 확인하며 하나라도 없거나 상대 경로가 루트를 벗어나면 처리 전에 종료한다. 재구축 종료 후
+다음 조건을 확인한다.
 
 - `documents.v2`가 재처리 가능한 문서 수와 일치한다.
 - `search_units.total > 0`이며 text/table/mixed 분포가 출력된다.
 - `assets.pending_review`, `pending_ocr`, `blocked`를 운영자가 확인한다.
 - 기존 `legacy_models`가 `embed-multilingual-v3.0/v3`로 유지된다.
-- 검색 품질과 권한 테스트가 통과한 뒤 RAG 환경을 v2로 전환한다.
+- `cutover-check`가 종료 코드 0과 `ready: true`를 반환한다. 시각 자산의 `pending_review`,
+  `pending_ocr`, `blocked`는 원본 유출 대신 안전한 텍스트 대체 표현을 사용한다는 경고이며,
+  모델 혼합·미마스킹 ready 자산·부분 재색인은 전환 실패로 판정한다. 보존된 v1
+  `doc_chunks`의 문서 ID도 v2 문서 ID와 대조하므로 단순히 총 문서 수만 맞춘 교체는 통과하지 않는다.
+- 검색 품질과 권한 테스트가 통과한 뒤에만 RAG 환경을 v2로 전환한다.
 
 ```sh
 KMU_INDEX_VERSION=v2

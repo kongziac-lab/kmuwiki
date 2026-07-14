@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from collections import Counter
+from pathlib import Path
 
 from .config import Settings
 from .backfill import BACKFILL_STATUSES, backfill_candidates
@@ -90,11 +91,31 @@ class DryRunStore:
 
     def multimodal_status(self) -> dict:
         return {
-            "documents": {"v1": 0, "v2": len(self._docs)},
-            "assets": {"total": len(self.assets)},
-            "search_units": {"total": len(self.search_units)},
+            "source_archives": {"total": len(self._zips)},
+            "documents": {
+                "total": len(self._docs), "v1": 0, "v2": len(self._docs),
+                "processed": sum(value == "processed" for value in self._docs.values()),
+                "processed_v1": 0,
+            },
+            "assets": {
+                "total": len(self.assets), "ready": 0, "pending_review": 0,
+                "pending_ocr": 0, "blocked": 0, "failed": 0,
+            },
+            "search_units": {
+                "total": len(self.search_units), "text": 0, "table": 0,
+                "image": 0, "mixed": 0, "models": {},
+            },
+            "integrity": {
+                "v2_without_search_units": 0,
+                "legacy_documents_without_v2": 0,
+                "ready_without_storage": 0,
+                "ready_without_redaction": 0,
+            },
             "legacy_models": {},
         }
+
+    def source_archive_report(self, zip_dir: str) -> dict:
+        return {"expected": 0, "available": 0, "missing": [], "unsafe": []}
 
 
 class SupabaseStore:
@@ -210,40 +231,41 @@ class SupabaseStore:
 
         old_paths = self._existing_asset_paths(document_id)
         uploaded_paths: set[str] = set()
-        for asset in assets:
-            if not asset.image_bytes:
-                continue
-            digest = asset.media_sha256 or sha256_bytes(asset.image_bytes)
-            asset.media_sha256 = digest
-            extension = _media_extension(asset.media_type)
-            asset.storage_path = f"{document_id}/{asset.asset_index}-{digest[:16]}.{extension}"
-            self._upload_asset(asset.storage_path, asset.image_bytes, asset.media_type)
-            uploaded_paths.add(asset.storage_path)
+        try:
+            for asset in assets:
+                if not asset.image_bytes:
+                    continue
+                digest = asset.media_sha256 or sha256_bytes(asset.image_bytes)
+                asset.media_sha256 = digest
+                extension = _media_extension(asset.media_type)
+                asset.storage_path = f"{document_id}/{asset.asset_index}-{digest[:16]}.{extension}"
+                uploaded_paths.add(asset.storage_path)
+                # 네트워크가 저장 직후 끊겨도 정리 대상에 포함되도록 호출 전에 기록한다.
+                self._upload_asset(asset.storage_path, asset.image_bytes, asset.media_type)
 
-        asset_rows = [self.asset_row(asset) for asset in assets]
-        unit_rows = [self.search_unit_row(unit, embedding, model, version)
-                     for unit, embedding in zip(units, embeddings)]
-        legacy_rows = []
-        if self.settings.write_legacy_index and legacy_chunks is not None:
-            legacy_rows = [self.legacy_chunk_row(chunk, embedding, model, version)
-                           for chunk, embedding in zip(
-                               legacy_chunks, legacy_embeddings or [])]
-        self.c.rpc("replace_document_index_v2", {
-            "target_document_id": document_id,
-            "asset_rows": asset_rows,
-            "unit_rows": unit_rows,
-            "target_visual_status": visual_status,
-            "legacy_rows": legacy_rows,
-        }).execute()
+            asset_rows = [self.asset_row(asset) for asset in assets]
+            unit_rows = [self.search_unit_row(unit, embedding, model, version)
+                         for unit, embedding in zip(units, embeddings)]
+            legacy_rows = []
+            if self.settings.write_legacy_index and legacy_chunks is not None:
+                legacy_rows = [self.legacy_chunk_row(chunk, embedding, model, version)
+                               for chunk, embedding in zip(
+                                   legacy_chunks, legacy_embeddings or [])]
+            self.c.rpc("replace_document_index_v2", {
+                "target_document_id": document_id,
+                "asset_rows": asset_rows,
+                "unit_rows": unit_rows,
+                "target_visual_status": visual_status,
+                "legacy_rows": legacy_rows,
+            }).execute()
+        except Exception:
+            # Storage와 PostgreSQL은 한 트랜잭션으로 묶을 수 없다. 이번 시도에서
+            # 처음 생긴 파생본만 제거하고 기존(동일 digest) 자산은 보존한다.
+            self._remove_asset_paths(sorted(uploaded_paths - old_paths))
+            raise
 
         stale_paths = sorted(old_paths - uploaded_paths)
-        if stale_paths:
-            try:
-                self.c.storage.from_(self.settings.visual_asset_bucket).remove(stale_paths)
-            except Exception:
-                # Stale redacted derivatives are private and remain RLS-protected;
-                # an operational cleanup job can retry without failing ingestion.
-                pass
+        self._remove_asset_paths(stale_paths)
 
     def _existing_asset_paths(self, document_id: str) -> set[str]:
         try:
@@ -261,6 +283,16 @@ class SupabaseStore:
         bucket = self.c.storage.from_(self.settings.visual_asset_bucket)
         options = {"content-type": media_type or "image/jpeg", "upsert": "true"}
         bucket.upload(path=path, file=payload, file_options=options)
+
+    def _remove_asset_paths(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        try:
+            self.c.storage.from_(self.settings.visual_asset_bucket).remove(paths)
+        except Exception:
+            # 파생본은 비공개이고 RLS로 보호된다. 정리 실패가 원래 인제스트
+            # 오류를 가리지 않도록 운영 정리 작업에서 재시도한다.
+            pass
 
     @staticmethod
     def asset_row(asset: DocumentAsset) -> dict:
@@ -335,13 +367,10 @@ class SupabaseStore:
             response = query.limit(1).execute()
             return int(getattr(response, "count", 0) or 0)
 
+        legacy_rows: list[dict] = []
         try:
-            legacy_rows = (
-                self.c.table("doc_chunks")
-                .select("embed_model,embed_version")
-                .limit(10000)
-                .execute().data or []
-            )
+            legacy_rows = self._select_all(
+                "doc_chunks", "document_id,embed_model,embed_version")
             legacy_models = dict(Counter(
                 f"{row.get('embed_model') or 'unknown'}/{row.get('embed_version') or 'unknown'}"
                 for row in legacy_rows
@@ -349,11 +378,30 @@ class SupabaseStore:
         except Exception:
             legacy_models = {}
 
+        unit_rows = self._select_all(
+            "search_units", "document_id,embed_model,embed_version")
+        unit_models = dict(Counter(
+            f"{row.get('embed_model') or 'unknown'}/{row.get('embed_version') or 'unknown'}"
+            for row in unit_rows
+        ))
+        v2_rows = self._select_all("documents", "id", index_version="v2")
+        v2_ids = {str(row["id"]) for row in v2_rows}
+        indexed_ids = {str(row["document_id"]) for row in unit_rows}
+        legacy_document_ids = {
+            str(row["document_id"]) for row in legacy_rows if row.get("document_id")
+        }
+        ready_assets = self._select_all(
+            "document_assets", "storage_path,redaction_applied", status="ready")
+
         return {
+            "source_archives": {"total": count("zip_archives")},
             "documents": {
+                "total": count("documents"),
                 "v1": count("documents", index_version="v1"),
                 "v2": count("documents", index_version="v2"),
                 "processed": count("documents", status="processed"),
+                "processed_v1": count(
+                    "documents", status="processed", index_version="v1"),
             },
             "assets": {
                 "total": count("document_assets"),
@@ -361,6 +409,7 @@ class SupabaseStore:
                 "pending_review": count("document_assets", status="pending_review"),
                 "pending_ocr": count("document_assets", status="pending_ocr"),
                 "blocked": count("document_assets", status="blocked"),
+                "failed": count("document_assets", status="failed"),
             },
             "search_units": {
                 "total": count("search_units"),
@@ -368,9 +417,62 @@ class SupabaseStore:
                 "table": count("search_units", modality="table"),
                 "image": count("search_units", modality="image"),
                 "mixed": count("search_units", modality="mixed"),
+                "models": unit_models,
+            },
+            "integrity": {
+                "v2_without_search_units": len(v2_ids - indexed_ids),
+                "legacy_documents_without_v2": len(legacy_document_ids - v2_ids),
+                "ready_without_storage": sum(
+                    not row.get("storage_path") for row in ready_assets),
+                "ready_without_redaction": sum(
+                    not bool(row.get("redaction_applied")) for row in ready_assets),
             },
             "legacy_models": legacy_models,
         }
+
+    def source_archive_report(self, zip_dir: str) -> dict:
+        """DB에 등록된 원본 ZIP이 지정한 읽기 루트에 모두 있는지 확인한다."""
+        root = Path(zip_dir).expanduser().resolve()
+        rows = self._select_all("zip_archives", "filename,source_path")
+        missing: list[str] = []
+        unsafe: list[str] = []
+        available = 0
+        for row in rows:
+            source = str(row.get("source_path") or row.get("filename") or "").strip()
+            if not source:
+                missing.append("<source_path 없음>")
+                continue
+            source_path = Path(source).expanduser()
+            candidate = source_path.resolve() if source_path.is_absolute() \
+                else (root / source_path).resolve()
+            if not source_path.is_absolute() and root not in candidate.parents:
+                unsafe.append(source)
+            elif candidate.is_file():
+                available += 1
+            else:
+                missing.append(source)
+        return {
+            "expected": len(rows),
+            "available": available,
+            "missing": sorted(missing),
+            "unsafe": sorted(unsafe),
+        }
+
+    def _select_all(self, table: str, columns: str, **equals) -> list[dict]:
+        """PostgREST 기본 행 제한을 넘겨도 운영 집계가 잘리지 않게 페이지 조회한다."""
+        rows: list[dict] = []
+        page_size = 1000
+        start = 0
+        while True:
+            query = self.c.table(table).select(columns)
+            for key, value in equals.items():
+                query = query.eq(key, value)
+            response = query.range(start, start + page_size - 1).execute()
+            page = list(response.data or [])
+            rows.extend(page)
+            if len(page) < page_size:
+                return rows
+            start += page_size
 
     def list_backfill_candidates(self, limit: int = 100):
         r = (self.c.table("documents")
