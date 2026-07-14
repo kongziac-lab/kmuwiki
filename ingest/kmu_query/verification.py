@@ -18,8 +18,8 @@ PLACE_TERMS = ("어디", "장소", "위치")
 APPROVAL_TERMS = ("승인", "결재", "확정", "완료")
 
 DATE_PATTERN = re.compile(
-    r"(20\d{2})[.\-/년]\s*(\d{1,2})(?:[.\-/월]\s*(\d{1,2}))?"
-    r"|(\d{1,2})/(\d{1,2})"
+    r"(20\d{2})[.\-/년]\s*(1[0-2]|0?[1-9])(?!\d)(?:[.\-/월]\s*(3[01]|[12]\d|0?[1-9])(?!\d))?"
+    r"|(1[0-2]|0?[1-9])/(3[01]|[12]\d|0?[1-9])(?!\d)"
 )
 COUNT_PATTERN = re.compile(r"(?<!\d)(\d{1,4})\s*(?:명|개|건|부|팀)(?!\d)")
 MONEY_PATTERN = re.compile(r"(?<!\d)(?:[$＄]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*(?:달러|원|천원|만원|억원|USD|KRW)?")
@@ -28,7 +28,7 @@ APPROVAL_PATTERN = re.compile(r"(전결|대결|승인|결재|확정|완료)")
 EVENT_ANCHORS = (
     "개최일시", "개최 일시", "개최일", "행사일시", "행사 일시", "일시:",
     "일시", "기간", "방문일", "내방일", "출장기간", "출장 기간", "면접일",
-    "시험일", "시행일",
+    "시험일", "시행일", "일자",
 )
 RELATED_ANCHORS = ("관련:", "관련 :", "관련문서", "관련 문서")
 APPROVAL_MARKERS = ("전결", "대결", "담당자", "팀장", "처장", "원장")
@@ -143,9 +143,9 @@ def _verify_date_question(query: str, sources: list[Source]) -> VerificationMemo
             doc_dates.append((idx, source.citation_doc_date or source.doc_date or "", label))
         for window in _date_windows(text):
             focus_text = f"{label} {window}"
-            if not _matches_focus(focus_text, focus_terms):
+            if not _matches_date_focus(focus_text, focus_terms, window):
                 continue
-            if _has_any(window, EVENT_ANCHORS):
+            if _has_any(window, EVENT_ANCHORS) or _looks_like_schedule_item(window):
                 event_hits.append((idx, window, label))
             elif _has_any(window, RELATED_ANCHORS):
                 related_hits.append((idx, window, label))
@@ -279,6 +279,15 @@ def _matches_focus(text: str, focus_terms: tuple[str, ...]) -> bool:
     return hits >= max(1, min(len(focus_terms), 2))
 
 
+def _matches_date_focus(text: str, focus_terms: tuple[str, ...], window: str) -> bool:
+    if _matches_focus(text, focus_terms):
+        return True
+    if not focus_terms or not _looks_like_schedule_item(window):
+        return False
+    compact_text = re.sub(r"\s+", "", text)
+    return any(re.sub(r"\s+", "", term) in compact_text for term in focus_terms)
+
+
 def _date_answer_from_event_hits(
     query: str,
     event_hits: list[tuple[int, str, str]],
@@ -379,6 +388,9 @@ def _date_uncertain_notes(
 
 def _event_date_summary(text: str) -> str:
     text = _compact(text)
+    focused = _schedule_item_around_date(text)
+    if focused:
+        return _short(focused, 100)
     patterns = (
         r"(내방일시\s*[:：]?\s*20\d{2}.{0,70})",
         r"(방문일\s*[:：]?\s*20\d{2}.{0,70})",
@@ -395,6 +407,50 @@ def _event_date_summary(text: str) -> str:
         summary = re.split(r"\s(?:주요내용|소요예산|장소|대상|비고|[가-하]\.|[0-9]+\.\s+(?!\d))", match.group(1), maxsplit=1)[0]
         return _short(summary, 100)
     return _short(text, 120)
+
+
+def _schedule_item_around_date(text: str) -> str | None:
+    match = DATE_PATTERN.search(text)
+    if not match:
+        return None
+
+    prefix = text[:match.start()]
+    start = _schedule_item_start(prefix)
+    end = _schedule_item_end(text, match.end())
+    item = text[start:end].strip(" \t\n\r.;")
+    item = re.sub(r"^(?:[가-하]\.\s*)+", "", item)
+    item = re.sub(r"^\d+\)\s+", "", item)
+    item = re.sub(r"\s+", " ", item).strip()
+    return item or None
+
+
+def _schedule_item_start(prefix: str) -> int:
+    candidates = [0]
+    for marker in re.finditer(r"(?:^|\s)(\d+\)|[가-하]\.)\s*", prefix):
+        candidates.append(marker.start(1))
+    anchors = (
+        "내방일시", "방문일", "개최일시", "행사일시", "출장기간", "출장 기간",
+        "면접일", "시험일", "시행일", "일자", "기간", "일시",
+    )
+    anchor_pattern = r"(" + "|".join(re.escape(anchor) for anchor in anchors) + r")\s*[:：]?"
+    for marker in re.finditer(anchor_pattern, prefix):
+        candidates.append(marker.start(1))
+    return max(candidates)
+
+
+def _schedule_item_end(text: str, after_date_index: int) -> int:
+    tail = text[after_date_index:]
+    candidates = [len(text)]
+    marker = re.search(r"\s(?:\d+\)|[가-하]\.)\s*", tail)
+    if marker:
+        candidates.append(after_date_index + marker.start())
+    label = re.search(
+        r"\s(?:주요내용|소요예산|장소|대상|비고|최종\s+선발자|선발\s+일정|붙임|첨부)\s*[:：]?",
+        tail,
+    )
+    if label:
+        candidates.append(after_date_index + label.start())
+    return min(candidates)
 
 
 def _primary_date(text: str) -> str | None:
@@ -438,8 +494,11 @@ def _group_for_citations(sources: list[Source]) -> list[Source]:
 def _date_windows(text: str) -> list[str]:
     windows = []
     for match in DATE_PATTERN.finditer(text):
-        start = max(0, match.start() - 90)
-        end = min(len(text), match.end() + 140)
+        start = _schedule_item_start(text[:match.start()])
+        end = _schedule_item_end(text, match.end())
+        if end <= start:
+            start = max(0, match.start() - 90)
+            end = min(len(text), match.end() + 140)
         windows.append(text[start:end].strip())
     return windows
 
@@ -453,6 +512,16 @@ def _looks_like_approval_line(sentence: str) -> bool:
         return False
     slash_dates = re.findall(r"\d{2}/\d{2}", sentence)
     return len(slash_dates) >= 2
+
+
+def _looks_like_schedule_item(sentence: str) -> bool:
+    if not DATE_PATTERN.search(sentence):
+        return False
+    compact = sentence.strip()
+    return bool(
+        re.match(r"\d+\)", compact)
+        or any(term in compact for term in ("면접", "시험", "일자", "차(", "차:", "내방", "방문"))
+    )
 
 
 def _compact(text: str) -> str:

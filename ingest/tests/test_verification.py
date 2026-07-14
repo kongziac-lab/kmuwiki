@@ -163,6 +163,53 @@ class TestVerificationMode(unittest.TestCase):
         self.assertIn("2026. 5. 30", memo.deterministic_answer or "")
         self.assertIn("2026. 3. 24", memo.deterministic_answer or "")
 
+    def test_exchange_student_schedule_cleans_table_rows(self):
+        sources = [
+            Source(
+                "exam1",
+                0,
+                "2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시. "
+                "형 가. 일시 1) 1차(영어권 TOEFL/IELTS, 영어권 기초전형 A그룹, "
+                "영어권 일반전형 TOEIC, 일본어, 스페인어, 러시아어, 독일어): "
+                "2026. 3. 23.(월) 09:00~ 2) 2차(영어권 면접): 2026. 3. 24.(화) 10:00~",
+                0.9,
+                filename="2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+                doc_no="국제교류팀-124",
+                dept="국제교류팀",
+            ),
+            Source(
+                "exam2",
+                0,
+                "영관 강의실 3) 언어권별 면접전형 계획: 붙임 3. 면접전형 실시 계획(안) 참고 "
+                "다. 최종 선발자 대상 수학 희망 대학 및 수학 기간 선정 계획 "
+                "1) 일자: 2026. 3. 26.(목) 2) 장소: 동영관 강의실",
+                0.8,
+                filename="2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+                doc_no="국제교류팀-124",
+                dept="국제교류팀",
+            ),
+            Source(
+                "period",
+                0,
+                "2026-2027학년도 해외 파견 교환학생 후보 선발 시험 실시. "
+                "기간: 2026학년도 2학기(한학기 또는 1년) 3) 선발 일정(세부사항은 붙임)",
+                0.7,
+                filename="2026-2027학년도 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+                dept="국제교류팀",
+            ),
+        ]
+
+        memo = build_verification_memo("교환학생 면접 일정에 대해 알려줘", sources)
+        answer = memo.deterministic_answer or ""
+
+        self.assertIn("1차(영어권 TOEFL/IELTS", answer)
+        self.assertIn("2026. 3. 23", answer)
+        self.assertIn("2차(영어권 면접): 2026. 3. 24", answer)
+        self.assertIn("일자: 2026. 3. 26", answer)
+        self.assertNotIn("형 가. 일시", answer)
+        self.assertNotIn("2026-2027학년도", answer)
+        self.assertNotIn("기간: 2026학년도 2학기", answer)
+
 
 if __name__ == "__main__":
     unittest.main()
