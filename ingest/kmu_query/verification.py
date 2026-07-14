@@ -143,7 +143,7 @@ def _verify_date_question(query: str, sources: list[Source]) -> VerificationMemo
             doc_dates.append((idx, source.citation_doc_date or source.doc_date or "", label))
         for window in _date_windows(text):
             focus_text = f"{label} {window}"
-            if not _matches_date_focus(focus_text, focus_terms, window):
+            if not _matches_date_focus(focus_text, focus_terms, window, text):
                 continue
             if _has_any(window, EVENT_ANCHORS) or _looks_like_schedule_item(window):
                 event_hits.append((idx, window, label))
@@ -279,13 +279,54 @@ def _matches_focus(text: str, focus_terms: tuple[str, ...]) -> bool:
     return hits >= max(1, min(len(focus_terms), 2))
 
 
-def _matches_date_focus(text: str, focus_terms: tuple[str, ...], window: str) -> bool:
+def _matches_date_focus(
+    text: str,
+    focus_terms: tuple[str, ...],
+    window: str,
+    source_text: str = "",
+) -> bool:
+    if _has_required_date_terms(focus_terms, window, source_text):
+        return True
+    if _has_missing_required_date_terms(focus_terms, window, source_text):
+        return False
     if _matches_focus(text, focus_terms):
         return True
     if not focus_terms or not _looks_like_schedule_item(window):
         return False
     compact_text = re.sub(r"\s+", "", text)
     return any(re.sub(r"\s+", "", term) in compact_text for term in focus_terms)
+
+
+def _has_required_date_terms(focus_terms: tuple[str, ...], window: str, source_text: str) -> bool:
+    required = _required_date_terms(focus_terms)
+    if not required:
+        return False
+    return all(_date_term_matches(term, window, source_text) for term in required)
+
+
+def _has_missing_required_date_terms(focus_terms: tuple[str, ...], window: str, source_text: str) -> bool:
+    required = _required_date_terms(focus_terms)
+    if not required:
+        return False
+    return not all(_date_term_matches(term, window, source_text) for term in required)
+
+
+def _required_date_terms(focus_terms: tuple[str, ...]) -> tuple[str, ...]:
+    important = []
+    for term in focus_terms:
+        if term in {"면접", "중국어", "영어권", "일본어", "스페인어", "러시아어", "독일어", "프랑스어"}:
+            important.append(term)
+    return tuple(important)
+
+
+def _date_term_matches(term: str, window: str, source_text: str) -> bool:
+    compact_window = re.sub(r"\s+", "", window)
+    compact_source = re.sub(r"\s+", "", source_text)
+    if term == "면접":
+        return "면접" in compact_window
+    if term == "중국어":
+        return "중국어" in compact_window or "중국어" in compact_source or "중문" in compact_source
+    return re.sub(r"\s+", "", term) in compact_window or re.sub(r"\s+", "", term) in compact_source
 
 
 def _date_answer_from_event_hits(
@@ -419,6 +460,7 @@ def _schedule_item_around_date(text: str) -> str | None:
     end = _schedule_item_end(text, match.end())
     item = text[start:end].strip(" \t\n\r.;")
     item = re.sub(r"^(?:[가-하]\.\s*)+", "", item)
+    item = re.sub(r"^[가-하]\)\s*", "", item)
     item = re.sub(r"^\d+\)\s+", "", item)
     item = re.sub(r"\s+", " ", item).strip()
     return item or None
@@ -426,7 +468,7 @@ def _schedule_item_around_date(text: str) -> str | None:
 
 def _schedule_item_start(prefix: str) -> int:
     candidates = [0]
-    for marker in re.finditer(r"(?:^|\s)(\d+\)|[가-하]\.)\s*", prefix):
+    for marker in re.finditer(r"(?:^|\s)(\d+\)|[가-하][.)])\s*", prefix):
         candidates.append(marker.start(1))
     anchors = (
         "내방일시", "방문일", "개최일시", "행사일시", "출장기간", "출장 기간",
@@ -441,7 +483,7 @@ def _schedule_item_start(prefix: str) -> int:
 def _schedule_item_end(text: str, after_date_index: int) -> int:
     tail = text[after_date_index:]
     candidates = [len(text)]
-    marker = re.search(r"\s(?:\d+\)|[가-하]\.)\s*", tail)
+    marker = re.search(r"\s(?:\d+\)|[가-하][.)])\s*", tail)
     if marker:
         candidates.append(after_date_index + marker.start())
     label = re.search(
@@ -520,7 +562,7 @@ def _looks_like_schedule_item(sentence: str) -> bool:
     compact = sentence.strip()
     return bool(
         re.match(r"\d+\)", compact)
-        or any(term in compact for term in ("면접", "시험", "일자", "차(", "차:", "내방", "방문"))
+        or any(term in compact for term in ("면접", "전형", "일자", "차(", "차:", "내방", "방문", "서류 접수", "서류접수"))
     )
 
 

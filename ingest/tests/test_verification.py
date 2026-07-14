@@ -202,13 +202,60 @@ class TestVerificationMode(unittest.TestCase):
         memo = build_verification_memo("교환학생 면접 일정에 대해 알려줘", sources)
         answer = memo.deterministic_answer or ""
 
-        self.assertIn("1차(영어권 TOEFL/IELTS", answer)
-        self.assertIn("2026. 3. 23", answer)
         self.assertIn("2차(영어권 면접): 2026. 3. 24", answer)
-        self.assertIn("일자: 2026. 3. 26", answer)
+        self.assertNotIn("1차(영어권 TOEFL/IELTS", answer)
+        self.assertNotIn("일자: 2026. 3. 26", answer)
         self.assertNotIn("형 가. 일시", answer)
         self.assertNotIn("2026-2027학년도", answer)
         self.assertNotIn("기간: 2026학년도 2학기", answer)
+
+    def test_chinese_exchange_interview_schedule_requires_language_and_interview(self):
+        sources = [
+            Source(
+                "doc-history-1",
+                0,
+                "국제교류팀-1784(2026. 2. 23.) 2026-2027학년도 해외 파견 교환학생 후보 선발 시험 실시",
+                0.9,
+                filename="2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 추가 모집 실시.pdf",
+                dept="국제교류팀",
+            ),
+            Source(
+                "doc-history-2",
+                0,
+                "국제교류팀-1843(2026. 2. 27.) 2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시",
+                0.8,
+                filename="2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 추가 모집 실시.pdf",
+                dept="국제교류팀",
+            ),
+            Source(
+                "chinese",
+                0,
+                "중국어 및 언어권 가) 서류 접수- 2026. 3. 20.(금) 15:00까지 "
+                "나) 면접 전형: 2026. 3. 23.(월) "
+                "다) 수학 희망 대학 선정: 2026. 3. 26.(목)",
+                0.7,
+                filename="2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 추가 모집 실시.pdf",
+                dept="국제교류팀",
+            ),
+            Source(
+                "approval",
+                0,
+                "03/16 03/16 03/16 담당자 이현지 팀장 조현욱 부처장 김종근 처장 민경모",
+                0.6,
+                filename="2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 추가 모집 실시.pdf",
+                dept="국제교류팀",
+            ),
+        ]
+
+        memo = build_verification_memo("중국어 교환학생 면접 일정에 대해 알려줘", sources)
+        answer = memo.deterministic_answer or ""
+
+        self.assertIn("면접 전형: 2026. 3. 23", answer)
+        self.assertNotIn("국제교류팀-1784", answer)
+        self.assertNotIn("국제교류팀-1843", answer)
+        self.assertNotIn("서류 접수", answer)
+        self.assertNotIn("수학 희망 대학 선정", answer)
+        self.assertNotIn("03/16", answer)
 
 
 if __name__ == "__main__":
