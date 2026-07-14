@@ -32,6 +32,14 @@ EVENT_ANCHORS = (
 )
 RELATED_ANCHORS = ("관련:", "관련 :", "관련문서", "관련 문서")
 APPROVAL_MARKERS = ("전결", "대결", "담당자", "팀장", "처장", "원장")
+# 언어권 그룹 라벨(예: "중국어권", "중국어 외 언어권", "중국어 및 언어권").
+# 일정 항목이 "나) 면접 전형: ..."처럼 라벨 없이 잘리므로, 직전 라벨을 붙여
+# 어느 언어권의 일정인지 표에서 구분되게 한다.
+LANG_GROUP_PATTERN = re.compile(r"[가-힣]+어(?:\s*(?:외|및)\s*언어)?권")
+LANG_BASES = ("중국어", "영어", "일본어", "스페인어", "러시아어", "독일어", "프랑스어")
+# 연락처·공개구분 등 결재/안내 보일러플레이트 — 일정 근거로 쓰지 않는다.
+PHONE_PATTERN = re.compile(r"0\d{1,2}-\d{3,4}-\d{4}")
+BOILERPLATE_MARKERS = ("[이메일]", "부분공개", "문의 사항", "문의사항")
 
 
 @dataclass(frozen=True)
@@ -130,6 +138,7 @@ def focus_sources(query: str, sources: list[Source], *, limit: int = 4) -> list[
 def _verify_date_question(query: str, sources: list[Source]) -> VerificationMemo:
     grouped = _group_for_citations(sources)
     focus_terms = _focus_terms(query)
+    required = _required_date_terms(query)
     event_hits: list[tuple[int, str, str]] = []
     related_hits: list[tuple[int, str, str]] = []
     approval_hits: list[tuple[int, str, str]] = []
@@ -143,14 +152,20 @@ def _verify_date_question(query: str, sources: list[Source]) -> VerificationMemo
             doc_dates.append((idx, source.citation_doc_date or source.doc_date or "", label))
         for window in _date_windows(text):
             focus_text = f"{label} {window}"
-            if not _matches_date_focus(focus_text, focus_terms, window, text):
+            if not _matches_date_focus(focus_text, focus_terms, window, text, required):
                 continue
-            if _has_any(window, EVENT_ANCHORS) or _looks_like_schedule_item(window):
+            # 결재라인·연락처 보일러플레이트를 행사일보다 먼저 걸러낸다
+            # (window에 '전형' 등이 섞여 있어도 일정 표에 오르지 않게).
+            if _looks_like_approval_line(window):
+                approval_hits.append((idx, window, label))
+                continue
+            if _looks_like_boilerplate(window):
+                continue
+            if (_has_any(window, EVENT_ANCHORS) or _looks_like_schedule_item(window)) \
+                    and _has_full_date(window):
                 event_hits.append((idx, window, label))
             elif _has_any(window, RELATED_ANCHORS):
                 related_hits.append((idx, window, label))
-            elif _looks_like_approval_line(window):
-                approval_hits.append((idx, window, label))
         if "서면결의" in text:
             form_hits.append((idx, label))
 
@@ -284,11 +299,13 @@ def _matches_date_focus(
     focus_terms: tuple[str, ...],
     window: str,
     source_text: str = "",
+    required: tuple[str, ...] | None = None,
 ) -> bool:
-    if _has_required_date_terms(focus_terms, window, source_text):
-        return True
-    if _has_missing_required_date_terms(focus_terms, window, source_text):
-        return False
+    if required is None:
+        required = ()
+    if required:
+        # 질문이 명시한 조건(면접·언어권)은 전부 충족해야 한다 — 하나라도 어긋나면 제외.
+        return all(_date_term_matches(term, window, source_text) for term in required)
     if _matches_focus(text, focus_terms):
         return True
     if not focus_terms or not _looks_like_schedule_item(window):
@@ -297,26 +314,23 @@ def _matches_date_focus(
     return any(re.sub(r"\s+", "", term) in compact_text for term in focus_terms)
 
 
-def _has_required_date_terms(focus_terms: tuple[str, ...], window: str, source_text: str) -> bool:
-    required = _required_date_terms(focus_terms)
-    if not required:
-        return False
-    return all(_date_term_matches(term, window, source_text) for term in required)
+def _required_date_terms(query: str) -> tuple[str, ...]:
+    """질문에서 반드시 지켜야 할 조건어를 뽑는다(질문 원문 기준).
 
-
-def _has_missing_required_date_terms(focus_terms: tuple[str, ...], window: str, source_text: str) -> bool:
-    required = _required_date_terms(focus_terms)
-    if not required:
-        return False
-    return not all(_date_term_matches(term, window, source_text) for term in required)
-
-
-def _required_date_terms(focus_terms: tuple[str, ...]) -> tuple[str, ...]:
-    important = []
-    for term in focus_terms:
-        if term in {"면접", "중국어", "영어권", "일본어", "스페인어", "러시아어", "독일어", "프랑스어"}:
-            important.append(term)
-    return tuple(important)
+    언어권은 부정형("중국어 외 …")과 긍정형("중국어권/중국어")을 구분한다 —
+    '중국어'가 '중국어 외 언어권'의 부분 문자열이라 focus 단어 매칭만으로는
+    정반대 언어권 일정이 통과해 버리기 때문이다.
+    """
+    compact = re.sub(r"\s+", "", query)
+    required: list[str] = []
+    if "면접" in compact:
+        required.append("면접")
+    for base in LANG_BASES:
+        if f"{base}외" in compact:      # 예: "중국어 외 언어권" 일정을 물음
+            required.append(f"{base}외")
+        elif base in compact:            # 예: "중국어권"/"중국어" 일정을 물음
+            required.append(base)
+    return tuple(required)
 
 
 def _date_term_matches(term: str, window: str, source_text: str) -> bool:
@@ -324,9 +338,25 @@ def _date_term_matches(term: str, window: str, source_text: str) -> bool:
     compact_source = re.sub(r"\s+", "", source_text)
     if term == "면접":
         return "면접" in compact_window
-    if term == "중국어":
-        return "중국어" in compact_window or "중국어" in compact_source or "중문" in compact_source
+    if term.endswith("외"):              # 부정형 질문: "중국어외" 표기 자체를 요구
+        return term in compact_window
+    if term in LANG_BASES:
+        # window 안에 언어권 표기가 있으면 window 기준으로만 판정한다.
+        # (문서 전체로 폴백하면 "중국어 외 언어권" 행이 문서 내 다른 곳의
+        #  "중국어권" 덕에 통과해 버린다.)
+        if LANG_GROUP_PATTERN.search(compact_window) or term in compact_window:
+            return _mentions_lang_positive(term, compact_window)
+        return (_mentions_lang_positive(term, compact_source)
+                or (term == "중국어" and "중문" in compact_source))
     return re.sub(r"\s+", "", term) in compact_window or re.sub(r"\s+", "", term) in compact_source
+
+
+def _mentions_lang_positive(term: str, compact: str) -> bool:
+    """'중국어…' 언급 중 '중국어외…'(해당 언어권 제외 표기)가 아닌 것이 있는가."""
+    return any(
+        not compact.startswith("외", m.end())
+        for m in re.finditer(re.escape(term), compact)
+    )
 
 
 def _date_answer_from_event_hits(
@@ -338,7 +368,14 @@ def _date_answer_from_event_hits(
     rows = []
     for idx, sentence, label in event_hits:
         summary = _event_date_summary(sentence)
-        key = (idx, _primary_date(summary) or summary)
+        # 요약이 항목 마커에서 다시 잘리며 언어권 라벨이 떨어지면 복원한다 —
+        # "면접 전형: 4. 2."만으로는 어느 언어권 일정인지 표에서 알 수 없다.
+        lang = LANG_GROUP_PATTERN.search(sentence)
+        if lang and lang.group(0) not in summary:
+            summary = f"{lang.group(0)} · {summary}"
+        # 요약 전체를 키로 쓴다. 첫 날짜만 키로 쓰면 같은 날짜로 시작하는
+        # 서로 다른 언어권 블록(예: 서류전형 3.10 공통)이 통째로 탈락한다.
+        key = (idx, _compact(summary))
         if key in seen:
             continue
         seen.add(key)
@@ -462,13 +499,17 @@ def _schedule_item_around_date(text: str) -> str | None:
     item = re.sub(r"^(?:[가-하]\.\s*)+", "", item)
     item = re.sub(r"^[가-하]\)\s*", "", item)
     item = re.sub(r"^\d+\)\s+", "", item)
+    item = re.sub(r"^\(\d+\)\s*", "", item)
     item = re.sub(r"\s+", " ", item).strip()
     return item or None
 
 
 def _schedule_item_start(prefix: str) -> int:
     candidates = [0]
-    for marker in re.finditer(r"(?:^|\s)(\d+\)|[가-하][.)])\s*", prefix):
+    # 항목 마커: "1)" "가)" "가." 에 더해 "(1)" 괄호형도 인식한다 —
+    # 전자결재 원문이 "나) 중국어권 (1) 서류 (2) 필기 (3) 면접" 구조라,
+    # 괄호 마커를 못 자르면 언어권 블록 전체가 한 window 로 뭉친다.
+    for marker in re.finditer(r"(?:^|\s)(\d+\)|\(\d+\)|[가-하][.)])\s*", prefix):
         candidates.append(marker.start(1))
     anchors = (
         "내방일시", "방문일", "개최일시", "행사일시", "출장기간", "출장 기간",
@@ -483,7 +524,7 @@ def _schedule_item_start(prefix: str) -> int:
 def _schedule_item_end(text: str, after_date_index: int) -> int:
     tail = text[after_date_index:]
     candidates = [len(text)]
-    marker = re.search(r"\s(?:\d+\)|[가-하][.)])\s*", tail)
+    marker = re.search(r"\s(?:\d+\)|\(\d+\)|[가-하][.)])\s*", tail)
     if marker:
         candidates.append(after_date_index + marker.start())
     label = re.search(
@@ -541,8 +582,19 @@ def _date_windows(text: str) -> list[str]:
         if end <= start:
             start = max(0, match.start() - 90)
             end = min(len(text), match.end() + 140)
-        windows.append(text[start:end].strip())
+        window = text[start:end].strip()
+        # "나) 면접 전형: …"처럼 언어권 라벨이 잘려 나간 항목에는 직전 라벨을
+        # 붙여 어느 언어권 일정인지 표와 필터에서 구분되게 한다.
+        label = _nearest_lang_group_label(text[:start])
+        if label and not LANG_GROUP_PATTERN.search(window):
+            window = f"{label} · {window}"
+        windows.append(window)
     return windows
+
+
+def _nearest_lang_group_label(prefix: str, lookback: int = 250) -> str | None:
+    hits = list(LANG_GROUP_PATTERN.finditer(prefix[-lookback:]))
+    return hits[-1].group(0) if hits else None
 
 
 def _has_any(text: str, terms: tuple[str, ...]) -> bool:
@@ -554,6 +606,17 @@ def _looks_like_approval_line(sentence: str) -> bool:
         return False
     slash_dates = re.findall(r"\d{2}/\d{2}", sentence)
     return len(slash_dates) >= 2
+
+
+def _looks_like_boilerplate(window: str) -> bool:
+    """연락처(전화/이메일)·공개구분·문의 안내 문맥 — 일정 근거에서 제외."""
+    return bool(PHONE_PATTERN.search(window)) or _has_any(window, BOILERPLATE_MARKERS)
+
+
+def _has_full_date(window: str) -> bool:
+    """일(日)까지 있는 날짜가 하나라도 있는가. '2026. 3.' 같은 연·월-only
+    조각(문서번호·본문 말미 표기)은 행사 일정 근거로 삼지 않는다."""
+    return any(m.group(3) or m.group(5) for m in DATE_PATTERN.finditer(window))
 
 
 def _looks_like_schedule_item(sentence: str) -> bool:

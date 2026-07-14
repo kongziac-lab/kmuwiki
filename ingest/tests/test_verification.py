@@ -257,6 +257,60 @@ class TestVerificationMode(unittest.TestCase):
         self.assertNotIn("수학 희망 대학 선정", answer)
         self.assertNotIn("03/16", answer)
 
+    # 실제 전자결재 원문 구조: 언어권별 블록이 괄호 마커 (1)(2)(3) 항목을 가진다.
+    SELECTION_BODY = (
+        "3. 시행 내용 가. 선발 일정 "
+        "가) 중국어 외 언어권 (1) 서류 전형: 2026. 3. 10.(화) 까지 "
+        "(2) 면접 전형: 2026. 3. 16.(월) (3) 수학 희망 대학 선정: 2026. 3. 20.(금) "
+        "나) 중국어권 (1) 서류 전형: 2026. 3. 10.(화) 까지 (2) 필기 시험: 2026. 3. 12.(목) "
+        "(3) 면접 전형: 2026. 3. 18.(수) (4) 수학 희망 대학 선정: 2026. 3. 24.(화)"
+    )
+
+    def _selection_sources(self):
+        return [Source(
+            "exam", 0, self.SELECTION_BODY, 0.9,
+            filename="2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+            dept="국제교류팀",
+        )]
+
+    def test_chinese_track_interview_excludes_non_chinese_track(self):
+        memo = build_verification_memo(
+            "중국어권 파견교환학생 면접 일정에 대해 알려줘", self._selection_sources())
+        answer = memo.deterministic_answer or ""
+
+        # 중국어권 면접(3.18)이 언어권 라벨과 함께 잡히고,
+        self.assertIn("2026. 3. 18", answer)
+        self.assertIn("중국어권 · 면접 전형", answer)
+        # 정반대인 "중국어 외 언어권" 면접(3.16)은 배제된다.
+        self.assertNotIn("2026. 3. 16", answer)
+
+    def test_non_chinese_track_question_flips_the_filter(self):
+        memo = build_verification_memo(
+            "중국어 외 언어권 면접 일정 알려줘", self._selection_sources())
+        answer = memo.deterministic_answer or ""
+
+        self.assertIn("2026. 3. 16", answer)
+        self.assertNotIn("2026. 3. 18", answer)
+
+    def test_contact_boilerplate_and_month_only_dates_are_not_schedules(self):
+        sources = [
+            Source(
+                "boiler", 0,
+                "면접 전형 문의 사항: 국제교류팀 이현지(053-580-6023 / [이메일]) "
+                "부분공개 2026. 3. 국 제 처 장 대기실 국327",
+                0.9,
+                filename="2026년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+                dept="국제교류팀",
+            ),
+        ]
+
+        memo = build_verification_memo("교환학생 면접 일정 알려줘", sources)
+        answer = memo.deterministic_answer or ""
+
+        # 연락처·연월-only 조각은 일정 표에 오르지 않는다 → 행사일시 미확인 답변.
+        self.assertNotIn("053-580-6023", answer)
+        self.assertIn("행사일시는 확인되지 않습니다", answer)
+
 
 if __name__ == "__main__":
     unittest.main()
