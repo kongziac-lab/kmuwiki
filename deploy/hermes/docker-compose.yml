@@ -1,0 +1,47 @@
+# KMU Wiki Hermes Agent PoC for Synology DS920+ Container Manager.
+#
+# Run from this directory on the NAS:
+#   cp .env.example .env
+#   # edit .env: API_SERVER_KEY, KMUWIKI_API_BASE_URL, KMUWIKI_AUTH_TOKEN
+#   docker compose up -d
+#
+# The container keeps Hermes state in /opt/data and mounts the kmuwiki search
+# skill read-only so updates are made through this repository.
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: kmuwiki-hermes
+    restart: unless-stopped
+    command: gateway run
+    env_file:
+      - .env
+    environment:
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_PORT: "8642"
+      HERMES_HOME: "/opt/data"
+      HOME: "/opt/data/home"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      XAI_API_KEY: "${XAI_API_KEY:-}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      TOGETHER_API_KEY: "${TOGETHER_API_KEY:-}"
+    ports:
+      # Default binds to NAS loopback. Set HERMES_API_BIND_ADDR to a Tailscale
+      # or LAN address only when firewall/VPN access is already restricted.
+      - "${HERMES_API_BIND_ADDR:-127.0.0.1}:${HERMES_API_HOST_PORT:-8642}:8642"
+    volumes:
+      # Use a Docker-managed volume. Synology shared-folder ACLs can make
+      # SMB-created bind-mount directories unreadable inside Linux containers.
+      - "hermes-data:/opt/data"
+      # Helper runtime path used by the kmuwiki smoke tests and skill commands.
+      - "./skills/kmuwiki:/opt/data/skills/kmuwiki:ro"
+    mem_limit: ${HERMES_MEM_LIMIT:-2g}
+
+volumes:
+  hermes-data:

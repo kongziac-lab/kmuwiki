@@ -1,0 +1,31 @@
+Run this on the NAS terminal or SSH:
+
+export HOME=/root
+cd /volume1/jdh/repo/deploy/hermes
+sh final-check-hermes.sh
+
+If you run as admin over SSH, the script may ask for the sudo password because
+Docker on Synology usually requires root privileges.
+
+Expected final log markers:
+
+FINAL_CHECK=PASSED
+test-hermes-chat=0
+CHAT_CHECK=FOUND_EVIDENCE_RESPONSE
+
+If the chat log says FAILED_NO_INFERENCE_PROVIDER, add one of these to
+/volume1/jdh/repo/deploy/hermes/.env and rerun:
+
+OPENROUTER_API_KEY=<key>
+OPENAI_API_KEY=<key>
+
+The final check syncs whitelisted .env values into /opt/data/.env and
+/opt/data/home/.hermes/.env inside the running container, then restarts the
+container before verification.
+
+If a previous run is stuck at the sudo prompt or Docker preparation step, press
+Ctrl+C, then rerun this file. start-hermes.sh removes stale preparation
+containers automatically.
+
+Then run deploy/hermes/access-log-check.sql in the Supabase SQL Editor to verify
+recent access_log rows for hermes-agent@kmu.local.

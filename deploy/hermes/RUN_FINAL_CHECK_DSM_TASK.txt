@@ -1,0 +1,46 @@
+DSM Task Scheduler command for the Hermes final check
+=====================================================
+
+DSM > Control Panel > Task Scheduler > Create > Triggered Task > User-defined script
+
+Recommended settings:
+
+- User: root, or an administrator account that can run Docker
+- Event: Run manually
+- Task name: Hermes final check
+
+User-defined script:
+
+export HOME=/root
+cd /volume1/jdh/repo/deploy/hermes
+sh final-check-hermes.sh
+
+If running from SSH as admin, the script may ask for the sudo password because
+Docker on Synology usually requires root privileges.
+
+After it finishes, check:
+
+/volume1/jdh/repo/deploy/hermes/logs/hermes-final-check.log
+/volume1/jdh/repo/deploy/hermes/logs/hermes-status.log
+
+Expected markers:
+
+FINAL_CHECK=PASSED
+test-hermes-chat=0
+CHAT_CHECK=FOUND_EVIDENCE_RESPONSE
+
+If the chat log says FAILED_NO_INFERENCE_PROVIDER, add one of these to
+/volume1/jdh/repo/deploy/hermes/.env and rerun:
+
+OPENROUTER_API_KEY=<key>
+OPENAI_API_KEY=<key>
+
+The final check syncs whitelisted .env values into /opt/data/.env and
+/opt/data/home/.hermes/.env inside the running container, then restarts the
+container before verification.
+
+If a previous run is stuck at the sudo prompt or Docker preparation step, stop
+the task and rerun it. start-hermes.sh removes stale preparation containers
+automatically.
+
+Then run access-log-check.sql in the Supabase SQL Editor.

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { MarkdownAnswer } from "@/components/MarkdownAnswer";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type Citation = { n: number; label: string };
@@ -122,7 +123,7 @@ function Chat({ email, onLogout }: { email: string; onLogout: () => void }) {
 
       {(answer || citations.length > 0) && (
         <div className="glass" style={{ marginTop: 18 }}>
-          {answer && <div className="answer">{answer}</div>}
+          {answer && <MarkdownAnswer text={answer} />}
           {citations.length > 0 && (
             <div className="sources">
               <h3>출처</h3>

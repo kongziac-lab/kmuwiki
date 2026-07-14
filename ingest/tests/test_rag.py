@@ -392,6 +392,17 @@ class TestApiSecretGate(unittest.TestCase):
         self.assertIsNone(service._target_year({"target_year": "1999"}))
         self.assertIsNone(service._target_year({"target_year": "bad"}))
 
+    def test_source_year_can_differ_from_target_year_for_hermes_workflows(self):
+        service = load_service_module()
+
+        self.assertEqual(
+            service._source_year({"source_year": 2026, "target_year": 2027}),
+            2026,
+        )
+        self.assertEqual(service._source_year({"year": 2025, "target_year": 2027}), 2025)
+        self.assertEqual(service._source_year({"target_year": 2027}), 2027)
+        self.assertIsNone(service._source_year({"source_year": "bad", "target_year": "1999"}))
+
     def test_missing_secret_configuration_allows_local_development(self):
         service = load_service_module()
         settings = SimpleNamespace(api_shared_secret="")

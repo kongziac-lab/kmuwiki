@@ -101,13 +101,32 @@ def _candidate_count(k: int, current_settings=settings) -> int:
     return max(k, min(current_settings.rerank_max_candidates, _CANDIDATE_HARD_CAP))
 
 
-def _target_year(body: dict) -> int | None:
-    value = body.get("target_year") or body.get("year")
+def _parse_year(value) -> int | None:
     try:
         year = int(value)
     except (TypeError, ValueError):
         return None
     return year if 2000 <= year <= 2100 else None
+
+
+def _target_year(body: dict) -> int | None:
+    return _parse_year(body.get("target_year") or body.get("year"))
+
+
+def _source_year(body: dict) -> int | None:
+    """Year used to filter retrieval.
+
+    Hermes-style workflows often need separate years: search the latest source
+    documents from one year, then draft a target-year artifact. Existing callers
+    that only send target_year keep the old behavior because target_year remains
+    the final fallback.
+    """
+    return _parse_year(
+        body.get("source_year")
+        or body.get("filter_year")
+        or body.get("year")
+        or body.get("target_year")
+    )
 
 
 def _apply_rerank(query: str, sources, *, top_n: int) -> RerankResult:
@@ -142,7 +161,7 @@ async def search(
     client, retriever = _client_and_retriever(authorization)
     query = body.get("query", "")
     k = _bounded_k(body)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = focus_sources(query, reranked.sources, limit=k)
@@ -166,7 +185,7 @@ async def chat(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
@@ -213,7 +232,7 @@ async def build_insights(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -248,7 +267,7 @@ async def build_studio(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -304,7 +323,7 @@ async def studio_summary(
     query = body.get("query", "")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
     reranked = _apply_rerank(query, sources, top_n=k)
     answer_sources = focus_sources(query, reranked.sources, limit=k)
@@ -350,7 +369,7 @@ async def hermes_report(
     target_year = body.get("target_year")
     client, retriever = _client_and_retriever(authorization)
     k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _target_year(body))
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
     log_access(
@@ -384,7 +403,7 @@ async def wiki_report(
         query,
         _candidate_count(k),
         body.get("dept"),
-        _target_year(body),
+        _source_year(body),
     )
     reranked = _apply_rerank(query, sources, top_n=k)
     sources = reranked.sources
