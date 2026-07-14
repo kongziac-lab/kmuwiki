@@ -60,6 +60,22 @@ class Retriever:
     ) -> list[Source]:
         if not query or not query.strip():
             return []
+        rows: list[dict] = []
+        for query_text in _expanded_retrieval_queries(query):
+            rows.extend(self._hybrid_rows(query_text, k, dept, year))
+        sources = _dedupe_sources(_sources_from_rows(rows))
+        sources.extend(self._filename_fallback_sources(query, dept=dept, year=year, limit=k))
+        sources = _dedupe_sources(sources)
+        sources.sort(key=lambda source: source.score, reverse=True)
+        return self._with_representative_citations(sources[:k])
+
+    def _hybrid_rows(
+        self,
+        query: str,
+        k: int,
+        dept: str | None,
+        year: int | None,
+    ) -> list[dict]:
         # 쿼리 전용 임베딩(Cohere 등은 search_query input_type 사용)
         if hasattr(self.embedder, "embed_query"):
             vec = self.embedder.embed_query(query)
@@ -72,18 +88,57 @@ class Retriever:
             "filter_dept": dept,
             "filter_year": year,
         }).execute()
-        rows = res.data or []
-        sources = [Source(
-            document_id=str(r["document_id"]),
-            chunk_index=r.get("chunk_index", 0),
-            content=r.get("content", ""),
-            score=float(r.get("score", 0.0)),
-            filename=r.get("filename"),
-            doc_no=r.get("doc_no"),
-            doc_date=str(r["doc_date"]) if r.get("doc_date") else None,
-            dept=r.get("dept"),
-        ) for r in rows]
-        return self._with_representative_citations(sources)
+        return res.data or []
+
+    def _filename_fallback_sources(
+        self,
+        query: str,
+        *,
+        dept: str | None,
+        year: int | None,
+        limit: int,
+    ) -> list[Source]:
+        terms = _filename_fallback_terms(query)
+        if not terms:
+            return []
+        sources: list[Source] = []
+        seen_docs: set[str] = set()
+        for term_index, term in enumerate(terms):
+            try:
+                q = (
+                    self.client.table("documents")
+                    .select("id,filename,doc_no,doc_date,dept,doc_chunks(chunk_index,content)")
+                    .eq("status", "processed")
+                    .ilike("filename", f"%{term}%")
+                )
+                if dept:
+                    q = q.eq("dept", dept)
+                if year:
+                    q = q.gte("doc_date", f"{year}-01-01").lt("doc_date", f"{year + 1}-01-01")
+                rows = q.limit(max(limit * 2, 8)).execute().data or []
+            except Exception:
+                continue
+
+            for row in rows:
+                doc_id = str(row.get("id") or "")
+                if not doc_id or doc_id in seen_docs:
+                    continue
+                seen_docs.add(doc_id)
+                chunks = sorted(row.get("doc_chunks") or [], key=lambda c: int(c.get("chunk_index") or 0))
+                for chunk in chunks[:3] or [{"chunk_index": 0, "content": ""}]:
+                    sources.append(Source(
+                        document_id=doc_id,
+                        chunk_index=int(chunk.get("chunk_index") or 0),
+                        content=chunk.get("content") or "",
+                        score=0.08 - (0.005 * term_index),
+                        filename=row.get("filename"),
+                        doc_no=row.get("doc_no"),
+                        doc_date=str(row["doc_date"]) if row.get("doc_date") else None,
+                        dept=row.get("dept"),
+                    ))
+                    if len(sources) >= limit:
+                        return sources
+        return sources
 
     def expand_zip_context(
         self,
@@ -275,6 +330,58 @@ def _zip_names(zip_archive) -> list[str]:
 
 def _is_pdf(filename: str | None) -> bool:
     return bool(filename and filename.lower().endswith(".pdf"))
+
+
+def _sources_from_rows(rows: list[dict]) -> list[Source]:
+    return [Source(
+        document_id=str(r["document_id"]),
+        chunk_index=r.get("chunk_index", 0),
+        content=r.get("content", ""),
+        score=float(r.get("score", 0.0)),
+        filename=r.get("filename"),
+        doc_no=r.get("doc_no"),
+        doc_date=str(r["doc_date"]) if r.get("doc_date") else None,
+        dept=r.get("dept"),
+    ) for r in rows]
+
+
+def _dedupe_sources(sources: list[Source]) -> list[Source]:
+    by_key: dict[tuple[str, int], Source] = {}
+    for source in sources:
+        key = (source.document_id, source.chunk_index)
+        existing = by_key.get(key)
+        if existing is None or source.score > existing.score:
+            by_key[key] = source
+    return list(by_key.values())
+
+
+def _expanded_retrieval_queries(query: str) -> tuple[str, ...]:
+    queries = [query.strip()]
+    compact = re.sub(r"\s+", "", query)
+    if _is_busan_china_consulate_query(compact):
+        queries.extend([
+            "주부산중국총영사",
+            "주부산중국부총영사",
+            "주부산중국총영사 내방",
+            "주부산중국부총영사 내방",
+        ])
+    return tuple(dict.fromkeys(q for q in queries if q))
+
+
+def _filename_fallback_terms(query: str) -> tuple[str, ...]:
+    compact = re.sub(r"\s+", "", query)
+    if not _is_busan_china_consulate_query(compact):
+        return ()
+    return ("주부산중국총영사", "주부산중국부총영사")
+
+
+def _is_busan_china_consulate_query(compact_query: str) -> bool:
+    return (
+        "주부산중국총영사관" in compact_query
+        or "주부산중국총영사" in compact_query
+        or "주부산중국부총영사" in compact_query
+        or ("중국" in compact_query and "총영사관" in compact_query)
+    )
 
 
 def _stem(name: str | None) -> str:

@@ -103,6 +103,32 @@ class TestSourceQualityHarness(unittest.TestCase):
 
         self.assertEqual({s.document_id for s in refined}, {"consul", "vice-consul"})
 
+    def test_consulate_status_query_filters_exchange_student_noise(self):
+        sources = [
+            source(
+                "exchange",
+                "2026학년도 2학기 해외 파견 교환학생 후보 선발 시험 실시.pdf",
+                "영어권, 중국어, 일본어 교환학생 후보 선발 시험 실시",
+                0.9,
+            ),
+            source(
+                "consul",
+                "주부산중국총영사 내방 업무 진행.pdf",
+                "주부산중국총영사 일행이 우리 대학교를 내방하는 바 내방자 명단 4명",
+                0.2,
+            ),
+            source(
+                "vice-consul",
+                "주부산중국부총영사 내방 업무 진행.pdf",
+                "주부산중국부총영사 일행이 우리 대학교를 내방하는 바 내방자 명단 4명",
+                0.1,
+            ),
+        ]
+
+        refined = refine_sources("주부산중국총영사관 교류 현황", sources, limit=8)
+
+        self.assertEqual({s.document_id for s in refined}, {"consul", "vice-consul"})
+
     def test_deduplication_prefers_validation_score_over_raw_score(self):
         sources = [
             source(

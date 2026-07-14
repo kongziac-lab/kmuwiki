@@ -39,6 +39,82 @@ class FakeClient:
         return FakeRPC(self.captured, name, params)
 
 
+class FakeMultiRPC:
+    def __init__(self, client, name, params):
+        self.client = client
+        self.name = name
+        self.params = params
+
+    def execute(self):
+        self.client.calls.append((self.name, self.params))
+        return FakeResp(self.client.rows_by_query.get(self.params["query_text"], []))
+
+
+class FakeMultiClient:
+    def __init__(self, rows_by_query, documents=None):
+        self.rows_by_query = rows_by_query
+        self.documents = documents or []
+        self.calls = []
+
+    def rpc(self, name, params):
+        return FakeMultiRPC(self, name, params)
+
+    def table(self, name):
+        if name != "documents":
+            raise AssertionError(name)
+        return FakeMetadataQuery(self.documents)
+
+
+class FakeMetadataQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.eq_filters = []
+        self.ilike_filter = None
+        self.gte_filter = None
+        self.lt_filter = None
+        self.limit_count = None
+
+    def select(self, _fields):
+        return self
+
+    def eq(self, field, value):
+        self.eq_filters.append((field, value))
+        return self
+
+    def ilike(self, field, pattern):
+        self.ilike_filter = (field, pattern.strip("%"))
+        return self
+
+    def gte(self, field, value):
+        self.gte_filter = (field, value)
+        return self
+
+    def lt(self, field, value):
+        self.lt_filter = (field, value)
+        return self
+
+    def limit(self, count):
+        self.limit_count = count
+        return self
+
+    def execute(self):
+        rows = list(self.rows)
+        for field, value in self.eq_filters:
+            rows = [row for row in rows if row.get(field) == value]
+        if self.ilike_filter:
+            field, term = self.ilike_filter
+            rows = [row for row in rows if term.lower() in str(row.get(field) or "").lower()]
+        if self.gte_filter:
+            field, value = self.gte_filter
+            rows = [row for row in rows if str(row.get(field) or "") >= value]
+        if self.lt_filter:
+            field, value = self.lt_filter
+            rows = [row for row in rows if str(row.get(field) or "") < value]
+        if self.limit_count is not None:
+            rows = rows[:self.limit_count]
+        return FakeResp(rows)
+
+
 class FakeTableQuery:
     def __init__(self, rows):
         self.rows = rows
@@ -136,6 +212,61 @@ class TestRetriever(unittest.TestCase):
     def test_empty_query_short_circuits(self):
         r = Retriever(FakeClient(rows=[]), FakeEmbedder())
         self.assertEqual(r.retrieve("   "), [])
+
+    def test_expands_busan_china_consulate_query_for_retrieval(self):
+        client = FakeMultiClient(rows_by_query={
+            "주부산중국총영사관 교류 현황": [{
+                "document_id": "exchange",
+                "chunk_index": 0,
+                "content": "교환학생 선발 시험",
+                "score": 0.9,
+                "filename": "교환학생.pdf",
+            }],
+            "주부산중국총영사": [{
+                "document_id": "consul",
+                "chunk_index": 0,
+                "content": "주부산중국총영사 일행이 우리 대학교를 내방",
+                "score": 0.7,
+                "filename": "주부산중국총영사 내방 업무 진행.pdf",
+            }],
+            "주부산중국부총영사": [{
+                "document_id": "vice-consul",
+                "chunk_index": 0,
+                "content": "주부산중국부총영사 일행이 우리 대학교를 내방",
+                "score": 0.6,
+                "filename": "주부산중국부총영사 내방 업무 진행.pdf",
+            }],
+        })
+
+        out = Retriever(client, FakeEmbedder()).retrieve("주부산중국총영사관 교류 현황", k=8)
+        query_texts = [params["query_text"] for _name, params in client.calls]
+
+        self.assertIn("주부산중국총영사", query_texts)
+        self.assertIn("주부산중국부총영사", query_texts)
+        self.assertIn("consul", {source.document_id for source in out})
+        self.assertIn("vice-consul", {source.document_id for source in out})
+
+    def test_consulate_query_uses_filename_fallback_when_hybrid_misses(self):
+        client = FakeMultiClient(
+            rows_by_query={},
+            documents=[{
+                "id": "consul-doc",
+                "status": "processed",
+                "filename": "주부산중국총영사 내방 업무 진행.pdf",
+                "doc_no": "국제교류팀-100",
+                "doc_date": "2026-04-01",
+                "dept": "국제교류팀",
+                "doc_chunks": [{
+                    "chunk_index": 0,
+                    "content": "주부산중국총영사 일행이 우리 대학교를 내방하는 업무 진행",
+                }],
+            }],
+        )
+
+        out = Retriever(client, FakeEmbedder()).retrieve("주부산중국총영사관 교류 현황", k=8)
+
+        self.assertEqual(out[0].document_id, "consul-doc")
+        self.assertEqual(out[0].filename, "주부산중국총영사 내방 업무 진행.pdf")
 
     def test_uses_zip_named_pdf_as_citation_source(self):
         client = FakeCitationClient(
