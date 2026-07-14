@@ -74,13 +74,27 @@ def _pdf(data: bytes) -> ParseResult:
         import pdfplumber  # lazy
     except ImportError:
         return ParseResult("", needs_ocr=True, mime_type="application/pdf")
-    parts: list[str] = []
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
-        for page in pdf.pages:
-            parts.append(page.extract_text() or "")
-    text = "\n".join(parts).strip()
+    try:
+        parts: list[str] = []
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            for page in pdf.pages:
+                parts.append(page.extract_text() or "")
+        text = "\n".join(parts).strip()
+    except Exception as exc:
+        # pdfminer 가 깨지는 PDF(예: "Invalid octal")는 pypdf 로 한 번 더 시도한다.
+        # 폴백까지 실패하면 원 예외를 그대로 올려 기존 failed 기록을 유지한다.
+        text = _pdf_via_pypdf(data, original=exc)
     # 텍스트가 거의 없으면 스캔 PDF로 보고 OCR 대상
     return ParseResult(text, needs_ocr=(len(text) < 20), mime_type="application/pdf")
+
+
+def _pdf_via_pypdf(data: bytes, *, original: Exception) -> str:
+    try:
+        from pypdf import PdfReader  # lazy
+        reader = PdfReader(io.BytesIO(data))
+        return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    except Exception:
+        raise original
 
 
 # ── Office ─────────────────────────────────────────────────────

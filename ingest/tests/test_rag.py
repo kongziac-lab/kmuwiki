@@ -311,6 +311,29 @@ class TestRetriever(unittest.TestCase):
             "국제교류팀-777 · 2026-06-30 · 출장 계획 보고.pdf",
         )
 
+    def test_representative_prefers_main_document_over_attachments(self):
+        # ZIP 이름과 기안문 파일명이 달라 exact 매칭이 실패해도, 사전순 첫
+        # 붙임([붙임 1] …)이 아니라 첨부가 아닌 결재문서가 대표가 되어야 한다.
+        from kmu_query.retriever import _representative_pdf
+
+        zip_join = {"filename": "공자아카데미 2025 결산서 및 2026 예산서 제출.zip",
+                    "source_path": "2026/공자아카데미 2025 결산서 및 2026 예산서 제출.zip"}
+        rows = [
+            {"filename": "[붙임 1] 2025 결산서(한중).pdf", "doc_no": "국제교류팀-981",
+             "doc_date": "2025-09-03", "zip_archives": zip_join},
+            {"filename": "[붙임 2] 2026 예산서(한중).pdf", "doc_no": "국제교류팀-981",
+             "doc_date": "2025-09-03", "zip_archives": zip_join},
+            {"filename": "공자아카데미 2025년도 사업 보조금 승인 보고.pdf", "doc_no": "국제교류팀-981",
+             "doc_date": "2025-09-03", "zip_archives": zip_join},
+        ]
+
+        rep = _representative_pdf(rows)
+        self.assertEqual(rep["filename"], "공자아카데미 2025년도 사업 보조금 승인 보고.pdf")
+
+        # 붙임밖에 없으면(기안문 파싱 실패 등) 최후 수단으로 붙임이라도 쓴다.
+        rep_only_attachments = _representative_pdf(rows[:2])
+        self.assertEqual(rep_only_attachments["filename"], "[붙임 1] 2025 결산서(한중).pdf")
+
     def test_falls_back_to_zip_named_pdf_when_representative_pdf_missing(self):
         client = FakeCitationClient(
             rows=[{

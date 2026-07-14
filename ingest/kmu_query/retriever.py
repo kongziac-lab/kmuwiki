@@ -277,6 +277,14 @@ class Retriever:
         return sources
 
 
+_ATTACHMENT_NAME = re.compile(r"^\s*(?:\[?\s*붙임|\d+\.\s)")
+
+
+def _looks_like_attachment_name(filename) -> bool:
+    """'[붙임 1] …' / '붙임 2. …' / '2. Tentative …' 류의 첨부 파일명인가."""
+    return bool(filename and _ATTACHMENT_NAME.match(str(filename)))
+
+
 def _representative_pdf(rows: list[dict]) -> dict | None:
     pdfs = [row for row in rows if _is_pdf(row.get("filename")) and row.get("doc_no")]
     if not pdfs:
@@ -289,7 +297,11 @@ def _representative_pdf(rows: list[dict]) -> dict | None:
         if _stem(name)
     }
     exact = [row for row in pdfs if _stem(row.get("filename")) in zip_stems]
-    candidates = exact or pdfs
+    # ZIP 이름과 정확히 일치하는 기안문이 없으면(제목이 다른 결재문서) 첨부가 아닌
+    # PDF 를 우선한다 — 그렇지 않으면 사전순 첫 붙임([붙임 1] …)이 대표로 뽑혀
+    # 출처 라벨이 붙임 파일명으로 표기된다.
+    main_docs = [row for row in pdfs if not _looks_like_attachment_name(row.get("filename"))]
+    candidates = exact or main_docs or pdfs
     return sorted(
         candidates,
         key=lambda row: (
