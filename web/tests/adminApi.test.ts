@@ -45,19 +45,38 @@ test("admin summary API exposes storage health monitoring", () => {
 test("local ingest is allowed only from local admin mode", () => {
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app" }), false);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "localhost:3000" }), true);
-  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "127.0.0.1:3000", enableFlag: "1" }), true);
+  assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "172.20.4.55:3000" }), false);
+  assert.equal(isLocalIngestAllowed({
+    nodeEnv: "production",
+    requestHost: "127.0.0.1:3000",
+    enableFlag: "1",
+    trustProxyHeaders: "1",
+    clientAddress: "127.0.0.1",
+  }), true);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "kmuwiki.vercel.app", enableFlag: "1" }), false);
 });
 
-test("local ingest allows private LAN hosts in local admin mode", () => {
+test("production local ingest trusts only explicitly enabled proxy client addresses", () => {
   assert.equal(isPrivateNetworkHost("172.20.4.55:3000"), true);
   assert.equal(isPrivateNetworkHost("192.168.0.25:3000"), true);
   assert.equal(isPrivateNetworkHost("10.0.0.8"), true);
   assert.equal(isPrivateNetworkHost("kmuwiki.vercel.app"), false);
 
-  assert.equal(isLocalIngestAllowed({ nodeEnv: "development", requestHost: "172.20.4.55:3000" }), true);
   assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "172.20.4.55:3000" }), false);
-  assert.equal(isLocalIngestAllowed({ nodeEnv: "production", requestHost: "172.20.4.55:3000", enableFlag: "1" }), true);
+  assert.equal(isLocalIngestAllowed({
+    nodeEnv: "production",
+    requestHost: "kmuwiki.internal",
+    enableFlag: "1",
+    trustProxyHeaders: "1",
+    clientAddress: "172.20.4.55",
+  }), true);
+  assert.equal(isLocalIngestAllowed({
+    nodeEnv: "production",
+    requestHost: "172.20.4.55:3000",
+    enableFlag: "1",
+    trustProxyHeaders: "1",
+    clientAddress: "203.0.113.10",
+  }), false);
 });
 
 test("ingest command uses configured zip folder without shell interpolation", () => {
@@ -82,9 +101,9 @@ test("web local ingest can use an admin supplied absolute zip folder", () => {
 });
 
 test("zip folder allowlist restricts admin supplied paths when configured", () => {
-  // 미설정 → 제한 없음(기존 동작 유지)
-  assert.equal(isZipDirAllowed(String.raw`Z:\anything`, parseAllowedIngestDirs(undefined)), true);
-  assert.equal(isZipDirAllowed("/tmp/x", parseAllowedIngestDirs("")), true);
+  // 미설정이면 실행 경로를 신뢰할 근거가 없으므로 fail-closed 한다.
+  assert.equal(isZipDirAllowed(String.raw`Z:\anything`, parseAllowedIngestDirs(undefined)), false);
+  assert.equal(isZipDirAllowed("/tmp/x", parseAllowedIngestDirs("")), false);
 
   const allowed = parseAllowedIngestDirs(String.raw`\\NAS\jdh\kmuwiki, Z:\KMU-Wiki-Zips`);
   // 하위 경로·대소문자·구분자(\, /) 차이는 허용

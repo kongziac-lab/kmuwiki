@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type SearchSource = {
@@ -30,18 +29,9 @@ export default function SearchPage() {
     });
   }, []);
 
-  return (
-    <AppShell
-      active="search"
-      eyebrow="문서 검색"
-      title={<>마스킹된 청크를 <span className="gradient-text">권한 범위 안에서</span> 검색</>}
-      lede="전자결재 문서의 마스킹된 청크를 권한 범위 안에서 검색합니다."
-    >
-      {!ready ? <p className="muted">로딩...</p>
-        : email ? <Search email={email} onLogout={() => setEmail(null)} />
-        : <Login onLogin={setEmail} />}
-    </AppShell>
-  );
+  return !ready ? <p className="muted">로딩...</p>
+    : email ? <Search email={email} onLogout={() => setEmail(null)} />
+    : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {

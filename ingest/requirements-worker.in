@@ -1,0 +1,11 @@
+# Local/NAS worker. Compile with:
+#   uv pip compile requirements-worker.in --python-version 3.12 --generate-hashes -o requirements-worker.txt
+-r requirements.in
+
+pdfplumber>=0.11
+pypdf>=5.0
+python-docx>=1.1
+openpyxl>=3.1
+xlrd>=2.0
+olefile>=0.47
+uvicorn>=0.30

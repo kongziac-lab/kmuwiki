@@ -12,11 +12,12 @@ Y:\Kmuwiki\
 ├─ 00_inbox\      ← ★새 ZIP 은 여기에만 넣는다 (연도 하위폴더 유지 가능)
 ├─ 01_raw\        ← 불변 원본 — 스테이저만 반입, 워커가 :ro 로 읽음. 직접 수정 금지
 └─ 99_rejected\   ← 검증 실패 격리 + reasons.log (사유: not-zip/empty/invalid-zip/
-                     too-large/too-many-entries/uncompressed-too-large/name-collision)
+                     too-large/too-many-entries/uncompressed-too-large/entry-too-large/
+                     suspicious-compression-ratio/name-collision)
 ```
 
 - 야간 배치가 **스테이징(검증 반입) → 인제스트** 순으로 돈다. 수동 실행:
-  `docker-compose run --rm stager`
+  `docker-compose --env-file ingest/.env.worker -f ingest/docker-compose.yml run --rm stager`
 - 5분 이내에 만들어진 파일은 "복사 중"으로 보고 건너뛴다(다음 실행 때 반입).
 - 같은 이름·같은 내용이 이미 01_raw 에 있으면 투입본을 지운다(중복). 같은 이름·다른
   내용이면 `이름-<sha8>.zip` 으로 나란히 보관한다 — 01_raw 는 절대 덮어쓰지 않는다.
@@ -41,10 +42,16 @@ robocopy "C:\Users\Owner\Documents\github\kmuwiki\ingest" "Y:\repo\ingest" /E /X
 > Git Server 패키지/entware 설치가 선행돼야 한다. 단순함은 위의 SMB 복사가 낫다.
 
 ## 3단계 — 빌드 & 1회 실행 (SSH 또는 Container Manager)
+
+컨테이너는 root가 아닌 전용 UID/GID로 실행된다. DSM에서 전용 로컬 계정을 만든 뒤
+`id -u <계정>`, `id -g <계정>` 값을 `.env.worker`의 `KMU_RUN_UID/GID`에 기록하고,
+그 계정에 `00_inbox`, `01_raw`, `99_rejected` 읽기·쓰기 권한을 부여한다. 워커는
+`01_raw`를 읽기 전용으로 마운트하므로 컨테이너 내부에서는 원본을 수정할 수 없다.
+
 ```sh
 cd /volume1/jdh/repo
 docker compose -f ingest/docker-compose.yml build
-docker compose -f ingest/docker-compose.yml run --rm worker run
+docker compose --env-file ingest/.env.worker -f ingest/docker-compose.yml run --rm worker run
 ```
 - 성공 판정: 콘솔에 상태 분포 출력, Supabase `documents`/청크 증가.
 - 소량 검증을 원하면 원본 폴더에 일부 ZIP만 두고 시작.
@@ -66,6 +73,7 @@ DSM > 제어판 > **작업 스케줄러** > 생성 > 예약된 작업 > **사용
 ## 점검 체크리스트
 - [ ] 경로 확인: `ls -d /volume*/jdh` 가 `/volume1/jdh` 출력
 - [ ] `ingest/` 복사됨 + `ingest/.env.worker` 존재(3키 채워짐), 권한 600 권장
+- [ ] 전용 NAS 계정 UID/GID를 `.env.worker`에 기록하고 단계형 폴더 ACL 부여
 - [ ] 폴더 구조: `/volume1/jdh/kmuwiki/{00_inbox,01_raw,99_rejected}` 존재
 - [ ] 볼륨 마운트 `/volume1/jdh/kmuwiki/01_raw:/data/zips:ro` 가 실제 원본과 매칭
 - [ ] 코드 변경 반영 시 이미지 재빌드(`docker-compose build`) — stage 커맨드 포함

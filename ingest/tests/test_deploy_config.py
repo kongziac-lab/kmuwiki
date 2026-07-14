@@ -25,10 +25,11 @@ class TestUnifiedVercelServicesConfig(unittest.TestCase):
 
         self.assertIn("process.env.NEXT_PUBLIC_RAG_URL", proxy)
         self.assertIn("new URL(requestUrl).origin", proxy)
-        self.assertIn("resolveRagBase(req.url)", chat_route)
-        self.assertIn("resolveRagBase(req.url)", search_route)
-        self.assertIn("resolveRagBase(req.url)", insights_route)
-        self.assertIn("resolveRagBase(req.url)", hermes_route)
+        self.assertIn("resolveRagBase(req.url)", proxy)
+        self.assertIn('proxyRagStream(req, "/chat")', chat_route)
+        self.assertIn('proxyRagJson(req, "/search")', search_route)
+        self.assertIn('proxyRagJson(req, "/insights")', insights_route)
+        self.assertIn('proxyRagJson(req, "/hermes")', hermes_route)
         self.assertNotIn("kmuwiki-api.vercel.app",
                          proxy + chat_route + search_route + insights_route + hermes_route)
 

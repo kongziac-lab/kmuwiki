@@ -23,7 +23,11 @@ class TestHermesDeploy(unittest.TestCase):
     def test_compose_runs_official_hermes_container_with_read_only_skill_mount(self):
         compose = (HERMES / "docker-compose.yml").read_text(encoding="utf-8")
 
-        self.assertIn("nousresearch/hermes-agent:latest", compose)
+        self.assertRegex(
+            compose,
+            r"nousresearch/hermes-agent:v[0-9.]+@sha256:[0-9a-f]{64}",
+        )
+        self.assertNotIn("nousresearch/hermes-agent:latest", compose)
         self.assertIn("command: gateway run", compose)
         self.assertIn("API_SERVER_ENABLED", compose)
         self.assertIn('HOME: "/opt/data/home"', compose)

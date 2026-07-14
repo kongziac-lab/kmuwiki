@@ -34,7 +34,9 @@ class StageLimits:
     min_age_seconds: int = 300                      # 이보다 최근 파일은 복사 중일 수 있음 → 스킵
     max_zip_bytes: int = 1024 * _MB                 # 압축 파일 자체 크기 상한
     max_entries: int = 5000                         # zip 항목 수 상한
-    max_uncompressed_bytes: int = 4096 * _MB        # 선언된 해제 크기 합 상한(zip 폭탄)
+    max_uncompressed_bytes: int = 1024 * _MB        # 선언된 해제 크기 합 상한(zip 폭탄)
+    max_entry_bytes: int = 128 * _MB                 # 파서가 한 번에 메모리에 올릴 단일 항목 상한
+    max_compression_ratio: int = 200                 # 비정상 고압축 엔트리 차단
 
     @classmethod
     def from_env(cls, env=os.environ) -> "StageLimits":
@@ -42,7 +44,9 @@ class StageLimits:
             min_age_seconds=int(env.get("KMU_STAGE_MIN_AGE_SECONDS", "300")),
             max_zip_bytes=int(env.get("KMU_STAGE_MAX_ZIP_MB", "1024")) * _MB,
             max_entries=int(env.get("KMU_STAGE_MAX_ENTRIES", "5000")),
-            max_uncompressed_bytes=int(env.get("KMU_STAGE_MAX_UNCOMPRESSED_MB", "4096")) * _MB,
+            max_uncompressed_bytes=int(env.get("KMU_STAGE_MAX_UNCOMPRESSED_MB", "1024")) * _MB,
+            max_entry_bytes=int(env.get("KMU_MAX_ZIP_ENTRY_MB", "128")) * _MB,
+            max_compression_ratio=int(env.get("KMU_MAX_ZIP_COMPRESSION_RATIO", "200")),
         )
 
 
@@ -70,6 +74,14 @@ def validate_zip(path: Path, limits: StageLimits) -> str | None:
         return "too-many-entries"
     if sum(i.file_size for i in infos) > limits.max_uncompressed_bytes:
         return "uncompressed-too-large"
+    if any(i.file_size > limits.max_entry_bytes for i in infos):
+        return "entry-too-large"
+    if any(
+        i.file_size > 0
+        and i.file_size / max(1, i.compress_size) > limits.max_compression_ratio
+        for i in infos
+    ):
+        return "suspicious-compression-ratio"
     return None
 
 

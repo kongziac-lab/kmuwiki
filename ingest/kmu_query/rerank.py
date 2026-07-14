@@ -16,11 +16,11 @@ class RerankResult:
 
 
 class CohereReranker:
-    def __init__(self, api_key: str, model: str = "rerank-v3.5"):
+    def __init__(self, api_key: str, model: str = "rerank-v3.5", timeout: float | None = None):
         import cohere
 
         self.model = model
-        self._client = cohere.Client(api_key)
+        self._client = cohere.Client(api_key, timeout=timeout)
 
     def rerank(self, query: str, sources: list[Source], *, top_n: int) -> list[Source]:
         documents = [_document_text(source) for source in sources]

@@ -21,10 +21,14 @@ python -m kmu_ingest.cli run --path ./zips --dry-run
 
 ## 운영 실행
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-worker.txt
 cp .env.example .env   # 값 채우기 (SUPABASE_*, KMU_EMBED_PROVIDER=bge-m3 등)
 python -m kmu_ingest.cli run
 ```
+
+`requirements.txt`는 Vercel RAG 서비스, `requirements-api.txt`는 로컬 ASGI 서버,
+`requirements-worker.txt`는 문서 파서를 포함한 NAS 워커용 잠금 파일이다. 세 파일 모두
+`requirements*.in`에서 해시와 함께 재현 가능하게 생성한다.
 
 원본 ZIP은 `./zips` 한 폴더에 계속 넣어도 된다. 워커는 하위 폴더까지 재귀적으로
 스캔하고, ZIP의 상대 경로를 `zip_archives.source_path`에 저장한다. 지식베이스 정리는
@@ -36,16 +40,18 @@ python -m kmu_ingest.cli run
 Windows 공유 드라이브나 NAS를 쓰는 경우 해당 컴퓨터의 환경변수를 기본값으로 두거나,
 웹 입력칸에 해당 경로를 넣어 실행한다.
 
-다른 내부망 컴퓨터의 브라우저에서 관리자 화면을 조작하려면 KMU Wiki 프로그램이 설치된
-컴퓨터에서 웹 서버를 LAN에 열어둔다.
+다른 내부망 컴퓨터에서 관리자 화면을 열 수는 있지만, 로컬 인제스트 실행 API는 요청의
+`Host`만으로 내부 사용자를 신뢰하지 않는다. 운영 모드에서 신뢰 가능한 역방향 프록시가
+클라이언트 IP를 설정하는 경우에만 아래 값을 사용한다.
 
 ```powershell
-cd C:\path\to\kmuwiki\web
-npm run dev -- -H 0.0.0.0
+$env:KMU_ENABLE_LOCAL_INGEST="1"
+$env:KMU_TRUST_PROXY_HEADERS="1"
+$env:KMU_LOCAL_INGEST_ALLOWED_DIRS="\\NAS\KMU-Wiki-Zips"
 ```
 
-그 다음 다른 컴퓨터에서 `http://프로그램컴퓨터IP:3000/admin`으로 접속한다. ZIP 폴더에는
-NAS/공유폴더 경로(예: `\\172.20.4.110\jdh\kmuwiki`)를 입력한다.
+프록시는 외부에서 전달된 `x-forwarded-for`를 제거한 뒤 실제 클라이언트 주소를 새로 넣어야
+한다. 개발 서버의 로컬 인제스트는 loopback 접속만 허용한다.
 
 ```bash
 # macOS

@@ -75,12 +75,16 @@ class CohereEmbedder:
     """
 
     def __init__(self, model: str = "embed-multilingual-v3.0", version: str = "v3",
-                 api_key: str | None = None):
+                 api_key: str | None = None, timeout: float | None = None):
         import cohere  # lazy
 
         self.model = model
         self.version = version
-        self._client = cohere.ClientV2(api_key or os.environ.get("COHERE_API_KEY"))
+        timeout = timeout or float(os.environ.get("KMU_PROVIDER_TIMEOUT_SECONDS", "120"))
+        self._client = cohere.ClientV2(
+            api_key or os.environ.get("COHERE_API_KEY"),
+            timeout=timeout,
+        )
 
     def _embed(self, texts: list[str], input_type: str) -> list[list[float]]:
         out: list[list[float]] = []

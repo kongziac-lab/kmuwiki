@@ -37,8 +37,10 @@ test("insights page wires Phase 4 and Phase 5 APIs into the web UI", () => {
 
 test("hwpx export proxy keeps the same authenticated RAG boundary", () => {
   const source = readWebFile("app/api/hermes/hwpx/route.ts");
-  assert.match(source, /rejectMissingAuthorization/);
-  assert.match(source, /buildRagHeaders/);
+  const proxy = readWebFile("lib/ragProxy.ts");
+  assert.match(source, /proxyRagFile/);
+  assert.match(proxy, /rejectMissingAuthorization/);
+  assert.match(proxy, /buildRagHeaders/);
   assert.match(source, /\/hermes\/hwpx/);
   assert.match(source, /application\/hwp\+zip/);
 });

@@ -1,5 +1,4 @@
-"use client";
-
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 type ActivePage = "chat" | "search" | "insights" | "studio" | "reports" | "workflows" | "admin";
@@ -30,12 +29,12 @@ export function AppShell({
   return (
     <main className="page app-shell">
       <div className="topnav">
-        <a className="brand" href="/">KMU Wiki</a>
+        <Link className="brand" href="/">KMU Wiki</Link>
         <nav>
           {NAV_ITEMS.map((item) => (
-            <a key={item.key} className={`navlink${active === item.key ? " active" : ""}`} href={item.href}>
+            <Link key={item.key} className={`navlink${active === item.key ? " active" : ""}`} href={item.href}>
               {item.label}
-            </a>
+            </Link>
           ))}
         </nav>
       </div>

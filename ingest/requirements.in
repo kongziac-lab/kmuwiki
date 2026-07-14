@@ -1,0 +1,10 @@
+# Search/RAG service (Vercel) and shared core. Compile with:
+#   uv pip compile requirements.in --python-version 3.12 --generate-hashes -o requirements.txt
+supabase>=2.6
+python-dotenv>=1.0
+cohere>=5.0
+anthropic>=0.40
+openai>=1.40
+google-genai>=1.0
+fastapi>=0.117
+python-docx>=1.1

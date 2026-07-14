@@ -22,6 +22,51 @@ from .metadata import extract_pdf_fields
 from .pipeline import WorkItem
 
 
+_READ_CHUNK_BYTES = 1024 * 1024
+
+
+class UnsafeZipEntry(ValueError):
+    pass
+
+
+def zip_entry_safety_reason(
+    info: zipfile.ZipInfo,
+    *,
+    max_entry_bytes: int,
+    max_compression_ratio: int,
+) -> str | None:
+    if info.file_size > max_entry_bytes:
+        return "entry-too-large"
+    if (info.file_size > 0
+            and info.file_size / max(1, info.compress_size) > max_compression_ratio):
+        return "suspicious-compression-ratio"
+    return None
+
+
+def read_zip_entry_bounded(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    max_entry_bytes: int,
+    max_compression_ratio: int,
+    pwd: bytes | None = None,
+) -> bytes:
+    reason = zip_entry_safety_reason(
+        info,
+        max_entry_bytes=max_entry_bytes,
+        max_compression_ratio=max_compression_ratio,
+    )
+    if reason:
+        raise UnsafeZipEntry(reason)
+    output = bytearray()
+    with zf.open(info, "r", pwd=pwd) as stream:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            output.extend(chunk)
+            if len(output) > max_entry_bytes:
+                raise UnsafeZipEntry("entry-too-large")
+    return bytes(output)
+
+
 def iter_zip_files(zip_dir: str) -> list[Path]:
     root = Path(zip_dir)
     return sorted(
@@ -55,8 +100,14 @@ def _tokens(s: str) -> set[str]:
     return {t for t in re.split(r"[\s_()\[\].-]+", s) if len(t) >= 2}
 
 
-def _zip_fields(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
-                names: list[str]) -> dict:
+def _zip_fields(
+    zf: zipfile.ZipFile,
+    infos: list[zipfile.ZipInfo],
+    names: list[str],
+    *,
+    max_entry_bytes: int,
+    max_compression_ratio: int,
+) -> dict:
     """기안문 PDF에서 ZIP 단위 메타 추출.
 
     기안문 선별: 폴더명과 동일한 PDF 우선, 없으면 폴더명과 제목 토큰이 가장 많이 겹치는 PDF.
@@ -79,7 +130,12 @@ def _zip_fields(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
     best_any: dict | None = None
     for info, _name in pdfs:
         try:
-            fields = extract_pdf_fields(zf.read(info))
+            fields = extract_pdf_fields(read_zip_entry_bounded(
+                zf,
+                info,
+                max_entry_bytes=max_entry_bytes,
+                max_compression_ratio=max_compression_ratio,
+            ))
         except Exception:
             continue
         if best_any is None:
@@ -90,7 +146,13 @@ def _zip_fields(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo],
 
 
 def iter_work(
-    zip_path: Path, store, *, zip_root: Path | None = None, force: bool = False,
+    zip_path: Path,
+    store,
+    *,
+    zip_root: Path | None = None,
+    force: bool = False,
+    max_entry_bytes: int = 128 * 1024 * 1024,
+    max_compression_ratio: int = 200,
 ) -> Iterator[WorkItem]:
     """한 ZIP을 열어 처리 대상 파일들을 WorkItem 으로 산출.
 
@@ -105,7 +167,13 @@ def iter_work(
     with zipfile.ZipFile(zip_path) as zf:
         infos = [i for i in zf.infolist() if not i.is_dir()]
         names = [_decode_name(i) for i in infos]
-        zip_fields = _zip_fields(zf, infos, names)
+        zip_fields = _zip_fields(
+            zf,
+            infos,
+            names,
+            max_entry_bytes=max_entry_bytes,
+            max_compression_ratio=max_compression_ratio,
+        )
         zip_id = store.register_zip(
             zip_path.name, zsha, len(infos),
             source_path=_relative_source_path(zip_path, zip_root),
@@ -113,10 +181,21 @@ def iter_work(
         for info, name in zip(infos, names):
             entry_enc = lockdetect.zip_entry_encrypted(info)
             # 엔트리가 암호화면 읽지 않는다(본문 미오픈, 불변식 2).
-            data = b"" if entry_enc else zf.read(info)
+            ingest_error = None
+            try:
+                data = b"" if entry_enc else read_zip_entry_bounded(
+                    zf,
+                    info,
+                    max_entry_bytes=max_entry_bytes,
+                    max_compression_ratio=max_compression_ratio,
+                )
+            except (UnsafeZipEntry, OSError, RuntimeError, zipfile.BadZipFile) as exc:
+                data = b""
+                ingest_error = f"unsafe ZIP entry: {exc}"
             yield WorkItem(
                 zip_sha256=zsha, zip_id=zip_id,
                 path_in_zip=name, filename=Path(name).name,
                 data=data, zip_entry_encrypted=entry_enc,
                 zip_fields=zip_fields,
+                ingest_error=ingest_error,
             )

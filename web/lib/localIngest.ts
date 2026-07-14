@@ -78,15 +78,29 @@ export function isLocalIngestAllowed({
   nodeEnv,
   requestHost,
   enableFlag,
+  clientAddress,
+  trustProxyHeaders,
 }: {
   nodeEnv?: string;
   requestHost?: string | null;
   enableFlag?: string;
+  clientAddress?: string | null;
+  trustProxyHeaders?: string;
 }): boolean {
-  const localHost = isLoopbackHost(requestHost) || isPrivateNetworkHost(requestHost);
-  if (!localHost) return false;
-  if (nodeEnv === "production") return enableFlag === "1";
-  return true;
+  if (nodeEnv !== "production") {
+    // Development is intentionally loopback-only. Host describes the server,
+    // not the caller, and therefore is never used as a production trust signal.
+    return isLoopbackHost(requestHost);
+  }
+  if (enableFlag !== "1" || trustProxyHeaders !== "1") return false;
+  return isLoopbackHost(clientAddress) || isPrivateNetworkHost(clientAddress);
+}
+
+export function trustedClientAddress(req: Request, trustProxyHeaders?: string): string {
+  if (trustProxyHeaders !== "1") return "";
+  const realIp = req.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+  return req.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim() ?? "";
 }
 
 export function parseAllowedIngestDirs(raw: string | null | undefined): string[] {
@@ -103,7 +117,7 @@ function canonicalizeFolderPath(input: string): string {
 }
 
 export function isZipDirAllowed(zipDir: string, allowedDirs: string[]): boolean {
-  if (allowedDirs.length === 0) return true; // 미설정 = 제한 없음(기존 동작 유지)
+  if (allowedDirs.length === 0) return false; // 실행 API는 allow-list 없이는 fail-closed
   const target = canonicalizeFolderPath(zipDir);
   return allowedDirs.some((base) => {
     const canonicalBase = canonicalizeFolderPath(base);

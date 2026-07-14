@@ -16,6 +16,11 @@ import zipfile
 
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"[ \t]+")
+_MAX_HWPX_ENTRIES = 2000
+_MAX_HWPX_TOTAL_BYTES = 128 * 1024 * 1024
+_MAX_HWPX_XML_BYTES = 16 * 1024 * 1024
+_MAX_HWPX_COMPRESSION_RATIO = 200
+_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def extract_hwp(data: bytes) -> str:
@@ -37,8 +42,29 @@ def extract_hwp(data: bytes) -> str:
 def extract_hwpx(data: bytes) -> str:
     parts: list[str] = []
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        for name in zf.namelist():
+        infos = zf.infolist()
+        if len(infos) > _MAX_HWPX_ENTRIES:
+            raise ValueError("HWPX entry count exceeds safety limit")
+        if sum(info.file_size for info in infos) > _MAX_HWPX_TOTAL_BYTES:
+            raise ValueError("HWPX uncompressed size exceeds safety limit")
+        for info in infos:
+            name = info.filename
             if name.lower().startswith("contents/") and name.lower().endswith(".xml"):
-                xml = zf.read(name).decode("utf-8", "replace")
+                if info.file_size > _MAX_HWPX_XML_BYTES:
+                    raise ValueError("HWPX XML entry exceeds safety limit")
+                if (info.file_size > 0
+                        and info.file_size / max(1, info.compress_size) > _MAX_HWPX_COMPRESSION_RATIO):
+                    raise ValueError("HWPX compression ratio exceeds safety limit")
+                xml = _read_zip_entry(zf, info, _MAX_HWPX_XML_BYTES).decode("utf-8", "replace")
                 parts.append(_TAG.sub(" ", xml))
     return _WS.sub(" ", " ".join(parts)).strip()
+
+
+def _read_zip_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo, limit: int) -> bytes:
+    output = bytearray()
+    with zf.open(info) as stream:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            output.extend(chunk)
+            if len(output) > limit:
+                raise ValueError("HWPX entry exceeds safety limit")
+    return bytes(output)

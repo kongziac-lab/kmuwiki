@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .pipeline import Deps, WorkItem, process
-from .watcher import _decode_name
+from .watcher import UnsafeZipEntry, _decode_name, read_zip_entry_bounded
 
 
 BACKFILL_STATUSES = {"pending_password", "pending_ocr"}
@@ -113,10 +113,23 @@ def _find_zip_entry(zf: zipfile.ZipFile, path_in_zip: str) -> zipfile.ZipInfo | 
     return None
 
 
-def _read_with_passwords(zf: zipfile.ZipFile, info: zipfile.ZipInfo, passwords: list[str]) -> bytes | None:
+def _read_with_passwords(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    passwords: list[str],
+    *,
+    max_entry_bytes: int = 128 * 1024 * 1024,
+    max_compression_ratio: int = 200,
+) -> bytes | None:
     for password in passwords:
         try:
-            return zf.read(info, pwd=password.encode("utf-8"))
+            return read_zip_entry_bounded(
+                zf,
+                info,
+                pwd=password.encode("utf-8"),
+                max_entry_bytes=max_entry_bytes,
+                max_compression_ratio=max_compression_ratio,
+            )
         except RuntimeError:
             continue
     return None
@@ -140,6 +153,9 @@ def run_backfill(
     manual_entries: list[dict] = []
     zip_root = Path(zip_dir)
     deps.reprocess_statuses = set(BACKFILL_STATUSES)
+    current_settings = getattr(deps, "settings", None)
+    max_entry_bytes = getattr(current_settings, "max_zip_entry_bytes", 128 * 1024 * 1024)
+    max_compression_ratio = getattr(current_settings, "max_zip_compression_ratio", 200)
 
     for candidate in candidates:
         if not candidate.zip_filename:
@@ -166,7 +182,18 @@ def run_backfill(
                     stats["manual_queue"] += 1
                     manual_entries.append(candidate.manual_queue("file-level encryption requires manual decryptor"))
                     continue
-                data = _read_with_passwords(zf, info, passwords)
+                try:
+                    data = _read_with_passwords(
+                        zf,
+                        info,
+                        passwords,
+                        max_entry_bytes=max_entry_bytes,
+                        max_compression_ratio=max_compression_ratio,
+                    )
+                except UnsafeZipEntry as exc:
+                    stats["manual_queue"] += 1
+                    manual_entries.append(candidate.manual_queue(f"unsafe ZIP entry: {exc}"))
+                    continue
                 if data is None:
                     stats["manual_queue"] += 1
                     manual_entries.append(candidate.manual_queue("password dictionary exhausted"))
@@ -176,7 +203,17 @@ def run_backfill(
                     stats["manual_queue"] += 1
                     manual_entries.append(candidate.manual_queue("ocr source zip entry is encrypted"))
                     continue
-                data = zf.read(info)
+                try:
+                    data = read_zip_entry_bounded(
+                        zf,
+                        info,
+                        max_entry_bytes=max_entry_bytes,
+                        max_compression_ratio=max_compression_ratio,
+                    )
+                except UnsafeZipEntry as exc:
+                    stats["manual_queue"] += 1
+                    manual_entries.append(candidate.manual_queue(f"unsafe ZIP entry: {exc}"))
+                    continue
 
         if dry_run:
             stats[f"would_{candidate.status}"] += 1

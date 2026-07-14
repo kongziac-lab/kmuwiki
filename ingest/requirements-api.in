@@ -1,0 +1,5 @@
+# Compatibility lock for local API deployments. The Vercel RAG service uses
+# requirements.txt; this profile additionally includes a standalone ASGI server.
+-r requirements.in
+
+uvicorn>=0.30

@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+import re
+
 from .retriever import Source
+
+
+_AUDIT_PATTERNS = (
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[이메일]"),
+    (re.compile(r"(?<!\d)\d{6}-?[1-4]\d{6}(?!\d)"), "[주민등록번호]"),
+    (re.compile(r"(?<!\d)01[016789]-?\d{3,4}-?\d{4}(?!\d)"), "[전화번호]"),
+)
+
+
+def sanitize_audit_query(query: str, limit: int = 500) -> str:
+    value = (query or "")[:limit]
+    for pattern, replacement in _AUDIT_PATTERNS:
+        value = pattern.sub(replacement, value)
+    return value
 
 
 def log_access(
@@ -30,8 +46,8 @@ def log_access(
     try:
         client.rpc("log_search_event", {
             "action_text": action,
-            "query_text": query,
-            "document_ids": document_ids,
+            "query_text": sanitize_audit_query(query),
+            "document_ids": document_ids[:50],
             "result_count": len(document_ids),
             "latency_ms": latency_ms,
             "rerank_provider": rerank_provider,
@@ -41,8 +57,8 @@ def log_access(
         try:
             client.rpc("log_access", {
                 "action_text": action,
-                "query_text": query,
-                "document_ids": document_ids,
+                "query_text": sanitize_audit_query(query),
+                "document_ids": document_ids[:50],
             }).execute()
         except Exception:
             return

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
-import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
+import { useBatchedText } from "@/lib/useBatchedText";
 
 type Citation = { n: number; label: string };
 
@@ -39,18 +39,9 @@ export default function StudioPage() {
     });
   }, []);
 
-  return (
-    <AppShell
-      active="studio"
-      eyebrow="업무 활용 · 스튜디오"
-      title={<>검색 자료로 <span className="gradient-text">요약·마인드맵·슬라이드·인포그래픽</span></>}
-      lede="검색된 근거 문서만으로 NotebookLM식 산출물을 만듭니다. 요약은 운영 LLM(마스킹 경계 유지), 나머지는 결정론적으로 생성되어 환각이 없습니다."
-    >
-      {!ready ? <p className="muted">로딩...</p>
-        : email ? <StudioWorkspace email={email} onLogout={() => setEmail(null)} />
-        : <Login onLogin={setEmail} />}
-    </AppShell>
-  );
+  return !ready ? <p className="muted">로딩...</p>
+    : email ? <StudioWorkspace email={email} onLogout={() => setEmail(null)} />
+    : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {
@@ -92,7 +83,7 @@ function StudioWorkspace({ email, onLogout }: { email: string; onLogout: () => v
   const [tab, setTab] = useState<Tab>("summary");
 
   const [studio, setStudio] = useState<StudioResponse | null>(null);
-  const [summary, setSummary] = useState("");
+  const { text: summary, append: appendSummary, flush: flushSummary, reset: resetSummary } = useBatchedText();
   const [citations, setCitations] = useState<Citation[]>([]);
   const [busy, setBusy] = useState(false);
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -109,38 +100,20 @@ function StudioWorkspace({ email, onLogout }: { email: string; onLogout: () => v
     setBusy(true);
     setErr("");
     setStudio(null);
-    setSummary("");
+    resetSummary();
     setCitations([]);
+    setSummaryBusy(true);
     try {
       const token = await getAccessToken();
       if (!token) throw new Error("로그인 세션이 없습니다.");
       const body = { query: query.trim(), dept: dept.trim() || undefined, k: 12 };
-      // 결정론적 산출물(마인드맵/슬라이드/인포그래픽/지표)을 먼저 받는다.
-      const res = await fetch("/api/studio", {
+      // 한 번의 검색 결과로 산출물과 요약을 함께 스트리밍한다.
+      const res = await fetch("/api/studio/stream", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error((await res.text()) || `studio ${res.status}`);
-      setStudio((await res.json()) as StudioResponse);
-      // 요약은 별도로 스트리밍한다.
-      void streamSummary(token, body);
-    } catch (error: unknown) {
-      setErr(error instanceof Error ? error.message : "생성 실패");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function streamSummary(token: string, body: unknown) {
-    setSummaryBusy(true);
-    try {
-      const res = await fetch("/api/studio/summary", {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      if (!res.body) return;
+      if (!res.ok || !res.body) throw new Error((await res.text()) || `studio ${res.status}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
@@ -155,12 +128,18 @@ function StudioWorkspace({ email, onLogout }: { email: string; onLogout: () => v
           const dataLine = /data: (.*)/.exec(block)?.[1];
           if (!ev || dataLine == null) continue;
           const data = JSON.parse(dataLine);
-          if (ev === "citations") setCitations(data as Citation[]);
-          else if (ev === "token") setSummary((a) => a + data);
+          if (ev === "studio") setStudio(data as StudioResponse);
+          else if (ev === "citations") setCitations(data as Citation[]);
+          else if (ev === "token") appendSummary(String(data));
         }
       }
+      flushSummary();
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : "생성 실패");
     } finally {
+      flushSummary();
       setSummaryBusy(false);
+      setBusy(false);
     }
   }
 

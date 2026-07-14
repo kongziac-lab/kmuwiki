@@ -47,6 +47,7 @@ class WorkItem:
     zip_entry_encrypted: bool
     zip_fields: dict = field(default_factory=dict)  # ZIP 단위 상속 메타(§7.B)
     sha256_override: str | None = None              # 백필: 기존 pending row 를 같은 sha 로 갱신
+    ingest_error: str | None = None                 # 런타임 ZIP 한도/해제 오류(본문 미처리)
 
 
 @dataclass
@@ -75,6 +76,16 @@ def process(item: WorkItem, deps: Deps) -> DocStatus:
     # ZIP 단위 메타(부서·문서번호·시행일)를 파일에 상속(§7.B). dept 미상이면 None=관리자 전용.
     meta = build_file_meta(item.filename, item.path_in_zip, None, item.zip_fields)
     _apply_organization(meta, None)
+
+    if item.ingest_error:
+        store.upsert_document(
+            sha256=sha,
+            zip_id=item.zip_id,
+            meta=meta,
+            status=DocStatus.FAILED.value,
+            error=item.ingest_error,
+        )
+        return DocStatus.FAILED
 
     # 2) 잠금탐지 (불변식 2): 본문을 열지 않고 판별. HWP 암호비트는 앞부분 밖일 수 있어 전체 전달.
     if item.zip_entry_encrypted or lockdetect.file_is_encrypted(item.filename, item.data):

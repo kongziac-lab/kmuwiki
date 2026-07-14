@@ -68,6 +68,9 @@ def safe_hwpx_filename(title: str) -> str:
 _MAX_TEMPLATE_BYTES = 20 * 1024 * 1024        # 압축(입력) 상한 20MB
 _MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024   # 전체 해제 상한 100MB
 _MAX_ENTRIES = 2000                            # zip 항목 수 상한
+_MAX_ENTRY_BYTES = 20 * 1024 * 1024            # 단일 항목 메모리 상한
+_MAX_COMPRESSION_RATIO = 200
+_READ_CHUNK_BYTES = 1024 * 1024
 
 
 def fill_template_hwpx(
@@ -94,10 +97,18 @@ def fill_template_hwpx(
             raise ValueError(f"HWPX 템플릿 항목 수 초과(> {_MAX_ENTRIES})")
         if sum(i.file_size for i in infos) > _MAX_UNCOMPRESSED_BYTES:
             raise ValueError("HWPX 템플릿 해제 크기 초과(zip 폭탄 의심)")
+        if any(i.file_size > _MAX_ENTRY_BYTES for i in infos):
+            raise ValueError("HWPX 템플릿 단일 항목 크기 초과")
+        if any(
+            i.file_size > 0
+            and i.file_size / max(1, i.compress_size) > _MAX_COMPRESSION_RATIO
+            for i in infos
+        ):
+            raise ValueError("HWPX 템플릿 압축률 초과(zip 폭탄 의심)")
         section_names = _section_names(zin)
         remaining = list(lines)
         for original_info in infos:
-            data = zin.read(original_info.filename)
+            data = _read_template_entry(zin, original_info)
             if original_info.filename in section_names:
                 text = data.decode("utf-8")
                 text, remaining = _replace_text_nodes(text, remaining)
@@ -108,6 +119,16 @@ def fill_template_hwpx(
                 data = _replace_package_title(data, title)
             zout.writestr(_copy_zip_info(original_info), data)
     return out.getvalue()
+
+
+def _read_template_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    output = bytearray()
+    with zf.open(info) as stream:
+        while chunk := stream.read(_READ_CHUNK_BYTES):
+            output.extend(chunk)
+            if len(output) > _MAX_ENTRY_BYTES:
+                raise ValueError("HWPX 템플릿 단일 항목 크기 초과")
+    return bytes(output)
 
 
 def fill_template_hwpx_from_base64(

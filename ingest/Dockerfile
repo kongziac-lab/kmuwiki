@@ -9,7 +9,7 @@
 # 빌드 컨텍스트는 이 파일이 있는 ingest/ 디렉터리.
 #   docker build -t kmu-ingest-worker ./ingest
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b
 
 # 파이썬 런타임 위생
 ENV PYTHONUNBUFFERED=1 \

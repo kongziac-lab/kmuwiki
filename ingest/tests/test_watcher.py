@@ -69,6 +69,22 @@ class TestWatcherSourcePaths(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(len(forced), 1)
 
+    def test_runtime_entry_limit_marks_item_failed_without_loading_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / "oversized.zip"
+            with zipfile.ZipFile(zip_path, "w") as zf:
+                zf.writestr("large.txt", b"12345")
+
+            items = list(iter_work(
+                zip_path,
+                CaptureZipStore(),
+                max_entry_bytes=4,
+            ))
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].data, b"")
+        self.assertIn("entry-too-large", items[0].ingest_error)
+
 
 if __name__ == "__main__":
     unittest.main()

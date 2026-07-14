@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
-import { AppShell } from "@/components/AppShell";
 import { WorkflowBoard, type WorkflowNode, type WorkflowNodeType } from "@/components/WorkflowBoard";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
@@ -150,18 +149,9 @@ export default function InsightsPage() {
     });
   }, []);
 
-  return (
-    <AppShell
-      active="insights"
-      eyebrow="업무 활용"
-      title={<>문서 묶음에서 <span className="gradient-text">업무 흐름과 초안</span> 만들기</>}
-      lede="권한 범위 안의 문서를 기반으로 분류, 일정, 보고서, 반복업무 초안을 생성합니다."
-    >
-      {!ready ? <p className="muted">로딩...</p>
-        : email ? <Workspace email={email} onLogout={() => setEmail(null)} />
-        : <Login onLogin={setEmail} />}
-    </AppShell>
-  );
+  return !ready ? <p className="muted">로딩...</p>
+    : email ? <Workspace email={email} onLogout={() => setEmail(null)} />
+    : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {

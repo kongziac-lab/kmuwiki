@@ -10,9 +10,10 @@ from kmu_ingest.staging import StageLimits, stage_inbox, validate_zip
 OLD = time.time() - 3600  # min_age(300s)를 확실히 지난 시각
 
 
-def _make_zip(path: Path, names=("doc.txt",), content=b"hello", mtime=OLD) -> None:
+def _make_zip(path: Path, names=("doc.txt",), content=b"hello", mtime=OLD,
+              compression=zipfile.ZIP_STORED) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w") as zf:
+    with zipfile.ZipFile(path, "w", compression=compression) as zf:
         for name in names:
             zf.writestr(name, content)
     os.utime(path, (mtime, mtime))
@@ -88,6 +89,19 @@ class TestStageInbox(unittest.TestCase):
         _make_zip(self.inbox / "fat.zip", content=b"x" * 5000)
         report = self.stage(min_age_seconds=300, max_uncompressed_bytes=1000)
         self.assertEqual(report.rejected, [("fat.zip", "uncompressed-too-large")])
+
+    def test_single_entry_and_compression_ratio_limits_reject(self):
+        _make_zip(self.inbox / "entry.zip", content=b"12345")
+        report = self.stage(min_age_seconds=300, max_entry_bytes=4)
+        self.assertEqual(report.rejected, [("entry.zip", "entry-too-large")])
+
+        _make_zip(
+            self.inbox / "ratio.zip",
+            content=b"0" * 10_000,
+            compression=zipfile.ZIP_DEFLATED,
+        )
+        report = self.stage(min_age_seconds=300, max_compression_ratio=2)
+        self.assertEqual(report.rejected, [("ratio.zip", "suspicious-compression-ratio")])
 
     def test_identical_duplicate_is_dropped(self):
         _make_zip(self.raw / "a.zip", content=b"same")

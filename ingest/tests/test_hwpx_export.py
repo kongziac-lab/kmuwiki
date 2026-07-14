@@ -86,6 +86,18 @@ class TestHwpxExport(unittest.TestCase):
         self.assertIn("<hp:t>둘째 줄</hp:t>", section_xml)
         self.assertIn("첫 줄", preview)
 
+    def test_rejects_suspiciously_compressed_template_entry(self):
+        template = io.BytesIO()
+        with zipfile.ZipFile(template, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("Contents/section0.xml", "0" * 100_000)
+
+        with self.assertRaisesRegex(ValueError, "압축률"):
+            fill_template_hwpx(
+                template_data=template.getvalue(),
+                title="보고서.hwpx",
+                body="본문",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

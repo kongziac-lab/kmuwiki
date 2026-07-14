@@ -33,21 +33,22 @@ services:
       KMU_EMBED_PROVIDER: cohere   # 기본값 fake 방지: 실제 임베딩 강제
       KMU_EMBED_MODEL: embed-multilingual-v3.0   # Cohere 실제 모델(1024d). 기본 fake-deterministic 방지
       KMU_EMBED_VERSION: v3        # 기존 Supabase 데이터와 동일 모델 핀
+      KMU_MAX_ZIP_ENTRY_MB: "128"
+      KMU_MAX_ZIP_COMPRESSION_RATIO: "200"
+      KMU_PROVIDER_TIMEOUT_SECONDS: "120"
     volumes:
       # 불변 원본(01_raw)만 읽는다. 새 ZIP 투입은 00_inbox → stager 검증 반입.
       # 리눅스는 대소문자 구분 — 실제 폴더명은 소문자 kmuwiki.
       # Windows Y:\Kmuwiki\01_raw  ==  NAS /volume1/jdh/kmuwiki/01_raw
       - /volume1/jdh/kmuwiki/01_raw:/data/zips:ro
     # ---- 하드닝 ----
-    # Synology 공유폴더 ACL(drwxrwxrwx+) 때문에 비-root(uid 10001)는 원본을 못 읽음.
-    # root로 실행해 ACL 우회. 마운트가 :ro + cap_drop/no-new-privileges 라 보호는 유지.
-    user: "0:0"                    # root (Synology ACL 회피)
+    # NAS ACL에서 아래 UID/GID에 01_raw 읽기 권한을 부여한다. root 우회는 허용하지 않는다.
+    user: "${KMU_RUN_UID:-10001}:${KMU_RUN_GID:-10001}"
     read_only: true                # 컨테이너 루트 FS 읽기 전용
     tmpfs:
       - /tmp                       # 파싱 임시 파일용 쓰기 가능 영역
-    # 주의: root(user 0:0)로 실행하므로 cap_drop:ALL 을 쓰면 DAC_OVERRIDE 가 사라져
-    #       앱 코드(worker 소유)·ACL 원본을 못 읽는다. 그래서 cap_drop 은 제거.
-    #       실질 보호는 :ro 마운트 + read_only 루트FS + no-new-privileges 로 유지.
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     # 배치 잡이므로 자동 재시작하지 않는다(스케줄러가 트리거).
@@ -67,16 +68,22 @@ services:
       KMU_RAW_DIR: /data/raw
       KMU_REJECTED_DIR: /data/rejected
       # 검증 한도(기본값): KMU_STAGE_MIN_AGE_SECONDS=300, KMU_STAGE_MAX_ZIP_MB=1024,
-      # KMU_STAGE_MAX_ENTRIES=5000, KMU_STAGE_MAX_UNCOMPRESSED_MB=4096
+      # KMU_STAGE_MAX_ENTRIES=5000, KMU_STAGE_MAX_UNCOMPRESSED_MB=1024
+      KMU_STAGE_MAX_UNCOMPRESSED_MB: "1024"
+      KMU_MAX_ZIP_ENTRY_MB: "128"
+      KMU_MAX_ZIP_COMPRESSION_RATIO: "200"
     volumes:
       - /volume1/jdh/kmuwiki/00_inbox:/data/inbox
       - /volume1/jdh/kmuwiki/01_raw:/data/raw
       - /volume1/jdh/kmuwiki/99_rejected:/data/rejected
-    user: "0:0"                    # Synology ACL 회피(워커와 동일 사유)
+    # 00_inbox/01_raw/99_rejected에 이 UID/GID의 읽기·쓰기 ACL을 부여한다.
+    user: "${KMU_RUN_UID:-10001}:${KMU_RUN_GID:-10001}"
     read_only: true
     tmpfs:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: "no"
     mem_limit: 1g

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
-import { AppShell } from "@/components/AppShell";
 import type { WorkflowNode } from "@/components/WorkflowBoard";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
@@ -32,18 +31,9 @@ export default function WorkflowsPage() {
     });
   }, []);
 
-  return (
-    <AppShell
-      active="workflows"
-      eyebrow="업무흐름도"
-      title={<>저장된 <span className="gradient-text">업무흐름도</span></>}
-      lede="업무 활용에서 생성한 흐름도를 별도 페이지로 저장하고 다시 확인합니다."
-    >
-      {!ready ? <p className="muted">로딩...</p>
-        : email ? <SavedWorkflowList email={email} onLogout={() => setEmail(null)} />
-        : <Login onLogin={setEmail} />}
-    </AppShell>
-  );
+  return !ready ? <p className="muted">로딩...</p>
+    : email ? <SavedWorkflowList email={email} onLogout={() => setEmail(null)} />
+    : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {

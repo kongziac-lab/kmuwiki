@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRagHeaders, rejectMissingAuthorization, resolveRagBase } from "../lib/ragProxy.ts";
+import {
+  buildRagHeaders,
+  readLimitedBody,
+  rejectMissingAuthorization,
+  resolveRagBase,
+} from "../lib/ragProxy.ts";
 
 test("resolveRagBase maps the default relative RAG path onto the request origin", () => {
   assert.equal(
@@ -32,4 +37,16 @@ test("rejectMissingAuthorization blocks public proxy abuse before RAG calls", as
   assert.equal(missing?.status, 401);
   assert.equal(await missing?.text(), "missing authorization");
   assert.equal(present, null);
+});
+
+test("readLimitedBody stops chunked requests at the configured byte cap", async () => {
+  const request = new Request("https://wiki.example/api/search", {
+    method: "POST",
+    body: "12345",
+  });
+
+  await assert.rejects(
+    () => readLimitedBody(request, 4),
+    (error: unknown) => error instanceof Response && error.status === 413,
+  );
 });

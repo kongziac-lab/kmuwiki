@@ -26,6 +26,12 @@ _load_dotenv()
 
 @dataclass
 class Settings:
+    # 런타임 보안 모드. Vercel production 또는 명시적 KMU_ENV=production 이면
+    # 공유 시크릿/CORS 등 공개 API 경계를 fail-closed 로 검증한다.
+    environment: str = (os.environ.get("KMU_ENV")
+                        or os.environ.get("VERCEL_ENV")
+                        or os.environ.get("ENVIRONMENT", "development")).lower()
+
     # 입력
     zip_dir: str = os.environ.get("KMU_ZIP_DIR", "./zips")
 
@@ -47,6 +53,9 @@ class Settings:
     chunk_chars: int = int(os.environ.get("KMU_CHUNK_CHARS", "1200"))
     chunk_overlap: int = int(os.environ.get("KMU_CHUNK_OVERLAP", "200"))
     max_chunks_per_doc: int = int(os.environ.get("KMU_MAX_CHUNKS_PER_DOC", "80"))
+    # ZIP 엔트리는 파서가 bytes 로 처리하므로 워커 메모리보다 충분히 낮게 제한한다.
+    max_zip_entry_bytes: int = int(os.environ.get("KMU_MAX_ZIP_ENTRY_MB", "128")) * 1024 * 1024
+    max_zip_compression_ratio: int = int(os.environ.get("KMU_MAX_ZIP_COMPRESSION_RATIO", "200"))
 
     # Supabase (service_role 키는 워커 전용; 클라이언트에 절대 노출 금지)
     supabase_url: str = os.environ.get("SUPABASE_URL", "")
@@ -81,6 +90,11 @@ class Settings:
     allowed_origins: str = os.environ.get("KMU_ALLOWED_ORIGINS", "*")
     api_max_k: int = int(os.environ.get("KMU_API_MAX_K", "20"))
     api_default_k: int = int(os.environ.get("KMU_API_DEFAULT_K", "8"))
+    api_max_body_bytes: int = int(os.environ.get("KMU_API_MAX_BODY_KB", "64")) * 1024
+    api_max_export_body_bytes: int = int(os.environ.get("KMU_API_MAX_EXPORT_BODY_MB", "24")) * 1024 * 1024
+    api_max_query_chars: int = int(os.environ.get("KMU_API_MAX_QUERY_CHARS", "1000"))
+    api_rate_limit_per_minute: int = int(os.environ.get("KMU_API_RATE_LIMIT_PER_MINUTE", "30"))
+    provider_timeout_seconds: float = float(os.environ.get("KMU_PROVIDER_TIMEOUT_SECONDS", "120"))
     audit_retention_days: int = int(os.environ.get("KMU_AUDIT_RETENTION_DAYS", "180"))
     rerank_provider: str = os.environ.get("KMU_RERANK_PROVIDER", "cohere")
     rerank_model: str = os.environ.get("KMU_RERANK_MODEL", "rerank-v3.5")
@@ -99,6 +113,10 @@ class Settings:
 
     # 동작 모드
     dry_run: bool = os.environ.get("KMU_DRY_RUN", "0") == "1"  # DB 미적재, 콘솔 출력만
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment in {"production", "prod"}
 
 
 def load_settings() -> Settings:

@@ -34,17 +34,23 @@ Supabase는 권한과 검색 데이터의 단일 저장소입니다.
 - 문서별 청크 상한: `KMU_MAX_CHUNKS_PER_DOC`, 기본 80개
 - 검색 결과 상한: `KMU_API_MAX_K`, 기본 20개
 - 검색 기본값: `KMU_API_DEFAULT_K`, 기본 8개
-- 오래된 감사 로그 보존 기간: `KMU_AUDIT_RETENTION_DAYS`, 기본 180일
+- 요청 본문/질문 상한: `KMU_API_MAX_BODY_KB`, `KMU_API_MAX_QUERY_CHARS`
+- 사용자별 분산 요청 제한: `KMU_API_RATE_LIMIT_PER_MINUTE`, 기본 분당 30회
+- 외부 제공자 호출 제한시간: `KMU_PROVIDER_TIMEOUT_SECONDS`, 기본 120초
+- 감사 로그 보존: DB 마이그레이션의 일일 정리 작업으로 기본 180일
 - ZIP 중복 방지: `zip_archives.sha256` unique
 - 문서 중복 방지: `documents.sha256` unique
 - 부서/연도 검색 필터: `/search`, `/chat`, `/insights`, `/hermes`, `/reports`에서 `dept`, `year` 또는 `target_year` 전달
 - pgvector HNSW 인덱스 확인: `admin_storage_health()` RPC의 `indexes.pgvector_hnsw`
 - 감사 로그 정리: `cleanup_access_log(retention_days)` RPC
+- 감사 쿼리: 이메일·전화번호·주민등록번호 마스킹, 500자/문서 50개 상한
 - Supabase 용량 모니터링: `admin_storage_health()` RPC의 `database_bytes`, 테이블별 bytes/counts
 
 ## 중요 보안 원칙
 
-Vercel 웹 앱에는 Supabase service role key를 넣지 않습니다. 웹/RAG API는 사용자 JWT와 anon key를 사용해 RLS를 적용합니다.
+Vercel 웹 앱에는 Supabase service role key를 넣지 않습니다. 웹/RAG API는 사용자 JWT를
+검증한 뒤 anon key와 사용자 토큰으로 RLS를 적용합니다. 운영 환경은 내부 공유 시크릿과
+명시적 CORS 허용 목록이 없으면 시작하지 않습니다.
 
 로컬 인제스트 PC에만 `SUPABASE_SERVICE_ROLE_KEY`를 둡니다. 원본 문서 추출, OCR, 마스킹, 임베딩 생성은 로컬에서 끝낸 뒤 결과만 Supabase에 저장합니다.
 

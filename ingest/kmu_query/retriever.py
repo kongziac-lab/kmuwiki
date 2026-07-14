@@ -25,6 +25,7 @@ class Source:
     citation_doc_no: str | None = None
     citation_doc_date: str | None = None
     citation_dept: str | None = None
+    zip_id: str | None = None
 
     def label(self) -> str:
         """인용 표기용 짧은 출처 라벨."""
@@ -67,7 +68,12 @@ class Retriever:
         sources.extend(self._filename_fallback_sources(query, dept=dept, year=year, limit=k))
         sources = _dedupe_sources(sources)
         sources.sort(key=lambda source: source.score, reverse=True)
-        return self._with_representative_citations(sources[:k])
+        selected = sources[:k]
+        # 0011+ hybrid_search returns representative metadata inline. Keep the
+        # older lookup path only as a rolling-deploy compatibility fallback.
+        if selected and all(source.citation_filename for source in selected):
+            return selected
+        return self._with_representative_citations(selected)
 
     def _hybrid_rows(
         self,
@@ -159,13 +165,15 @@ class Retriever:
         if limit_per_zip is None and char_budget is None:
             char_budget = FULL_ZIP_CHAR_BUDGET
         try:
-            docs = self._fetch_source_documents([s.document_id for s in sources])
-            zip_ids = sorted({str(row.get("zip_id")) for row in docs.values() if row.get("zip_id")})
+            zip_ids = sorted({str(source.zip_id) for source in sources if source.zip_id})
+            if not zip_ids:
+                docs = self._fetch_source_documents([s.document_id for s in sources])
+                zip_ids = sorted({str(row.get("zip_id")) for row in docs.values() if row.get("zip_id")})
             if not zip_ids:
                 return sources
             rows = self._fetch_zip_chunk_sources(
                 zip_ids, limit_per_zip=limit_per_zip, char_budget=char_budget)
-            expanded = self._with_representative_citations(rows)
+            expanded = rows
         except Exception:
             return sources
 
@@ -241,16 +249,32 @@ class Retriever:
     ) -> list[Source]:
         res = (
             self.client.table("documents")
-            .select("id,zip_id,filename,doc_no,doc_date,dept,doc_chunks(chunk_index,content)")
+            .select(
+                "id,zip_id,filename,doc_no,doc_date,dept,document_kind,"
+                "zip_archives(filename,source_path),doc_chunks(chunk_index,content)"
+            )
             .in_("zip_id", zip_ids)
             .eq("status", "processed")
             .execute()
         )
+        rows = res.data or []
+        by_zip: dict[str, list[dict]] = {}
+        for row in rows:
+            by_zip.setdefault(str(row.get("zip_id")), []).append(row)
+        representatives = {
+            zip_id: rep
+            for zip_id, group in by_zip.items()
+            if (rep := _representative_pdf(group)) is not None
+        }
+        for zip_id, fallback in _fallback_representatives_from_rows(zip_ids, rows).items():
+            representatives.setdefault(zip_id, fallback)
+
         sources: list[Source] = []
         per_zip: dict[str, int] = {}
         total_chars = 0
-        for row in sorted(res.data or [], key=_zip_context_sort_key):
+        for row in sorted(rows, key=_zip_context_sort_key):
             zip_id = str(row.get("zip_id"))
+            representative = representatives.get(zip_id, {})
             count = per_zip.get(zip_id, 0)
             if limit_per_zip is not None and count >= limit_per_zip:
                 continue
@@ -270,6 +294,12 @@ class Retriever:
                     doc_no=row.get("doc_no"),
                     doc_date=str(row["doc_date"]) if row.get("doc_date") else None,
                     dept=row.get("dept"),
+                    citation_filename=representative.get("filename") or row.get("filename"),
+                    citation_doc_no=representative.get("doc_no") or row.get("doc_no"),
+                    citation_doc_date=(str(representative["doc_date"])
+                                       if representative.get("doc_date") else None),
+                    citation_dept=representative.get("dept") or row.get("dept"),
+                    zip_id=zip_id,
                 ))
                 total_chars += len(content)
                 count += 1
@@ -326,6 +356,13 @@ def _fallback_representatives(zip_ids: list[str], source_docs: dict[str, dict]) 
     return fallbacks
 
 
+def _fallback_representatives_from_rows(zip_ids: list[str], rows: list[dict]) -> dict[str, dict]:
+    return _fallback_representatives(
+        zip_ids,
+        {str(row.get("id") or index): row for index, row in enumerate(rows)},
+    )
+
+
 def _zip_context_sort_key(row: dict) -> tuple:
     filename = str(row.get("filename") or "")
     has_doc_no = 0 if row.get("doc_no") else 1
@@ -354,6 +391,12 @@ def _sources_from_rows(rows: list[dict]) -> list[Source]:
         doc_no=r.get("doc_no"),
         doc_date=str(r["doc_date"]) if r.get("doc_date") else None,
         dept=r.get("dept"),
+        citation_filename=r.get("citation_filename"),
+        citation_doc_no=r.get("citation_doc_no"),
+        citation_doc_date=(str(r["citation_doc_date"])
+                           if r.get("citation_doc_date") else None),
+        citation_dept=r.get("citation_dept"),
+        zip_id=str(r["zip_id"]) if r.get("zip_id") else None,
     ) for r in rows]
 
 

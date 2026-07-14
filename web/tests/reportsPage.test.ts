@@ -24,9 +24,11 @@ test("reports page exposes the wiki report writer workflow", () => {
 
 test("reports proxy keeps the authenticated RAG boundary", () => {
   const source = readWebFile("app/api/reports/route.ts");
+  const proxy = readWebFile("lib/ragProxy.ts");
 
-  assert.match(source, /rejectMissingAuthorization/);
-  assert.match(source, /buildRagHeaders/);
+  assert.match(source, /proxyRagJson/);
+  assert.match(proxy, /rejectMissingAuthorization/);
+  assert.match(proxy, /buildRagHeaders/);
   assert.match(source, /\/reports/);
 });
 

@@ -3,29 +3,8 @@
 
 export const runtime = "nodejs";
 
-import { buildRagHeaders, rejectMissingAuthorization, resolveRagBase } from "@/lib/ragProxy";
+import { proxyRagStream } from "@/lib/ragProxy";
 
 export async function POST(req: Request) {
-  const body = await req.text();
-  const auth = req.headers.get("authorization") ?? "";
-  const unauthorized = rejectMissingAuthorization(auth);
-  if (unauthorized) return unauthorized;
-
-  const upstream = await fetch(`${resolveRagBase(req.url)}/studio/summary`, {
-    method: "POST",
-    headers: buildRagHeaders(auth),
-    body,
-  });
-
-  if (!upstream.ok || !upstream.body) {
-    return new Response(`upstream error: ${upstream.status}`, { status: 502 });
-  }
-
-  return new Response(upstream.body, {
-    headers: {
-      "content-type": "text/event-stream; charset=utf-8",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    },
-  });
+  return proxyRagStream(req, "/studio/summary");
 }

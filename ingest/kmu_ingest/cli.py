@@ -56,7 +56,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     zip_root = Path(settings.zip_dir)
     for zp in zips:
         print(f"\n# {zp.name}")
-        for item in iter_work(zp, store, zip_root=zip_root, force=force):
+        for item in iter_work(
+            zp,
+            store,
+            zip_root=zip_root,
+            force=force,
+            max_entry_bytes=settings.max_zip_entry_bytes,
+            max_compression_ratio=settings.max_zip_compression_ratio,
+        ):
             status = process(item, deps)
             stats[status.value] += 1
 

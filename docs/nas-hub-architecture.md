@@ -50,6 +50,9 @@
 | `KMU_OCR_BACKEND` | `none` | OCR(torch)은 4GB RAM에 부담 → GPU 박스로 유예(`pending_ocr`) |
 | `KMU_ENABLE_NER` | `0` | 성명 NER(torch) 비활성 → 이미지 경량화 |
 | `KMU_EMBED_PROVIDER` | `cohere` | 기본값 `fake` 방지: 실제 임베딩 강제 |
+| `KMU_MAX_ZIP_ENTRY_MB` | `128` | 단일 ZIP/HWPX 항목 메모리 사용 상한 |
+| `KMU_MAX_ZIP_COMPRESSION_RATIO` | `200` | 비정상 고압축 ZIP/HWPX 차단 |
+| `KMU_RUN_UID/GID` | `10001` | 컨테이너 비-root 실행 계정 |
 
 ## 배포 절차
 
@@ -61,11 +64,12 @@ cp ingest/.env.worker.example ingest/.env.worker
 # 2) 원본 공유폴더 경로를 docker-compose.yml volumes 에 지정 (:ro 유지)
 #    이 환경: /volume1/jdh/kmuwiki/01_raw:/data/zips:ro  (Windows Y:\Kmuwiki\01_raw 와 동일)
 #    stager 는 00_inbox(rw)·01_raw(rw)·99_rejected(rw) 를 마운트한다.
+#    KMU_RUN_UID/GID 계정에 위 세 폴더 ACL을 부여한다.
 
 # 3) 1회성 배치 실행
-docker compose -f ingest/docker-compose.yml run --rm worker run
+docker compose --env-file ingest/.env.worker -f ingest/docker-compose.yml run --rm worker run
 #    백필:
-docker compose -f ingest/docker-compose.yml run --rm worker backfill
+docker compose --env-file ingest/.env.worker -f ingest/docker-compose.yml run --rm worker backfill
 
 # 4) Synology 작업 스케줄러에 (3)을 야간 cron 으로 등록
 ```
@@ -76,6 +80,7 @@ docker compose -f ingest/docker-compose.yml run --rm worker backfill
 
 - **키 최소화.** 워커는 `SUPABASE_SERVICE_ROLE_KEY` + `COHERE_API_KEY` **2개만** 둔다. 답변 생성용 키(ANTHROPIC/NOUS/GEMINI/anon)는 NAS에 두지 않는다(그건 Vercel `/rag` 전용).
 - **원본 read-only.** 워커는 원본 ZIP을 읽기만 하므로 `:ro` 마운트. 컨테이너 루트 FS도 `read_only`.
+- **비-root·capability 제거.** 전용 NAS UID/GID로 실행하고 Linux capability를 모두 제거한다.
 - **공유폴더 암호화.** 원본 폴더는 Synology 암호화 공유폴더(AES-256) + 스냅샷 + 오프사이트 백업.
 - **인바운드 차단.** QuickConnect/UPnP/포트포워딩 비활성, DSM 최신 패치, 기본 admin 비활성 + 2FA. 관리·SMB는 VPN/Tailscale 내부망에서만.
 - **아웃바운드 화이트리스트.** Supabase·Cohere 도메인만 허용.

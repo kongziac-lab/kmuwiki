@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AppShell } from "@/components/AppShell";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
 type Summary = {
@@ -48,25 +47,8 @@ export default function AdminPage() {
     });
   }, []);
 
-  if (!ready) return <Frame><p style={muted}>로딩...</p></Frame>;
-  return (
-    <Frame>
-      {email ? <Dashboard email={email} onLogout={() => setEmail(null)} /> : <Login onLogin={setEmail} />}
-    </Frame>
-  );
-}
-
-function Frame({ children }: { children: React.ReactNode }) {
-  return (
-    <AppShell
-      active="admin"
-      eyebrow="관리자"
-      title="KMU Wiki 운영 대시보드"
-      lede="문서 적재 상태, 검토 큐, 로컬 인제스트 실행을 관리합니다."
-    >
-      {children}
-    </AppShell>
-  );
+  if (!ready) return <p style={muted}>로딩...</p>;
+  return email ? <Dashboard email={email} onLogout={() => setEmail(null)} /> : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {

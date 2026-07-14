@@ -3,13 +3,12 @@
   POST /search  → 하이브리드 검색 결과(출처) JSON
   POST /chat    → SSE 스트림(먼저 citations, 이어서 답변 토큰)
 
-RLS: 요청의 Authorization: Bearer <사용자 JWT> 로 Supabase 클라이언트를 인증한다.
-헤더가 없으면 anon 권한 → 정책상 아무 문서도 안 보인다(deny-by-default).
+RLS: 요청의 Authorization: Bearer <사용자 JWT> 를 먼저 검증한 뒤 해당 사용자
+권한으로 Supabase 클라이언트를 구성한다. 인증이 없거나 검증되지 않으면 요청을 거부한다.
 """
 
 from __future__ import annotations
 
-import hmac
 import json
 import time
 from urllib.parse import quote
@@ -17,6 +16,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from kmu_ingest.config import load_settings
 from kmu_ingest.embedding import make_embedder
@@ -33,37 +33,48 @@ from .rerank import CohereReranker, RerankResult, rerank_sources
 from .source_quality import refine_sources
 from .verification import focus_sources, needs_full_zip_context
 from .audit import log_access
+from .http_security import (
+    authorize_request,
+    bounded_text,
+    read_json_object,
+    require_api_secret as _require_api_secret,
+    validate_query_body,
+    validate_runtime_security,
+)
 
 settings = load_settings()
-_embedder = make_embedder(settings.embed_provider, settings.embed_model, settings.embed_version)
+validate_runtime_security(settings)
+_embedder = None
 _reranker = None
 _reranker_checked = False
 
 app = FastAPI(title="KMU Wiki Search/RAG")
-# CORS 허용 출처: KMU_ALLOWED_ORIGINS(콤마 구분)로 제한. 미설정 시 "*"(개발) 폴백.
+# 운영은 validate_runtime_security 에서 명시적 allow-list를 강제한다.
 _allowed_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()] or ["*"]
 app.add_middleware(
-    CORSMiddleware, allow_origins=_allowed_origins, allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_methods=["POST", "OPTIONS"],
+    allow_headers=["authorization", "content-type", "x-kmuwiki-api-secret"],
+    max_age=600,
 )
 
 
-def _client(authorization: str | None):
-    """사용자 JWT로 인증된 Supabase 클라이언트(RLS 적용)."""
-    from supabase import create_client
-
-    c = create_client(settings.supabase_url, settings.supabase_anon_key)
-    if authorization and authorization.lower().startswith("bearer "):
-        c.postgrest.auth(authorization.split(" ", 1)[1])
-    return c
+def _authorized_context(authorization: str | None, api_secret: str | None, action: str):
+    client = authorize_request(authorization, api_secret, action, settings)
+    return client, Retriever(client, _get_embedder())
 
 
-def _retriever(authorization: str | None) -> Retriever:
-    return Retriever(_client(authorization), _embedder)
-
-
-def _client_and_retriever(authorization: str | None):
-    client = _client(authorization)
-    return client, Retriever(client, _embedder)
+def _get_embedder():
+    """외부 SDK와 모델 초기화는 실제 검색 요청이 들어올 때까지 지연한다."""
+    global _embedder
+    if _embedder is None:
+        _embedder = make_embedder(
+            settings.embed_provider,
+            settings.embed_model,
+            settings.embed_version,
+        )
+    return _embedder
 
 
 def _get_reranker():
@@ -74,7 +85,11 @@ def _get_reranker():
     if settings.rerank_provider != "cohere" or not settings.cohere_api_key:
         return None
     try:
-        _reranker = CohereReranker(settings.cohere_api_key, settings.rerank_model)
+        _reranker = CohereReranker(
+            settings.cohere_api_key,
+            settings.rerank_model,
+            timeout=settings.provider_timeout_seconds,
+        )
     except Exception:
         _reranker = None
     return _reranker
@@ -140,13 +155,32 @@ def _apply_rerank(query: str, sources, *, top_n: int) -> RerankResult:
     )
 
 
+def _retrieve_ranked(
+    retriever: Retriever,
+    query: str,
+    body: dict,
+    *,
+    default_k: int = 8,
+    refine: bool = False,
+    focus: bool = False,
+):
+    k = _bounded_k(body, default=default_k)
+    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
+    if refine:
+        sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+    reranked = _apply_rerank(query, sources, top_n=k)
+    sources = focus_sources(query, reranked.sources, limit=k) if focus else reranked.sources
+    return sources, reranked
+
+
 def require_api_secret(header_secret: str | None, current_settings=settings) -> None:
-    """공개 API 직접 호출 차단. 로컬 개발 편의를 위해 미설정이면 비활성."""
-    expected = current_settings.api_shared_secret
-    if not expected:
-        return
-    if not header_secret or not hmac.compare_digest(header_secret, expected):
-        raise HTTPException(status_code=401, detail="invalid api secret")
+    """Compatibility wrapper retained for focused unit tests."""
+    _require_api_secret(header_secret, current_settings)
+
+
+async def _query_request(req: Request) -> tuple[dict, str]:
+    body = await read_json_object(req, max_bytes=settings.api_max_body_bytes)
+    return body, validate_query_body(body, settings)
 
 
 @app.post("/search")
@@ -155,22 +189,24 @@ async def search(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    client, retriever = _client_and_retriever(authorization)
-    query = body.get("query", "")
-    k = _bounded_k(body)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
-    reranked = _apply_rerank(query, sources, top_n=k)
-    sources = focus_sources(query, reranked.sources, limit=k)
-    log_access(
-        client, action="search", query=query, sources=sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
-    return JSONResponse({"sources": [s.__dict__ for s in sources]})
+    body, query = await _query_request(req)
+
+    def work():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "search")
+        k = _bounded_k(body)
+        sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
+        sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+        reranked = _apply_rerank(query, sources, top_n=k)
+        sources = focus_sources(query, reranked.sources, limit=k)
+        log_access(
+            client, action="search", query=query, sources=sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        return JSONResponse({"sources": [s.__dict__ for s in sources]})
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/chat")
@@ -179,24 +215,27 @@ async def chat(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
-    reranked = _apply_rerank(query, sources, top_n=k)
-    # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
-    zip_limit = None if needs_full_zip_context(query) else 12
-    focused_sources = focus_sources(query, reranked.sources, limit=k)
-    answer_sources = retriever.expand_zip_context(focused_sources, limit_per_zip=zip_limit)
-    log_access(
-        client, action="chat", query=query, sources=focused_sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
+    body, query = await _query_request(req)
+
+    def prepare():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "chat")
+        k = _bounded_k(body)
+        sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
+        sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
+        reranked = _apply_rerank(query, sources, top_n=k)
+        # 검증 민감 질문은 ZIP 전체를 투입해 루프 없이 전수 대조한다(준-검증모드).
+        zip_limit = None if needs_full_zip_context(query) else 12
+        focused_sources = focus_sources(query, reranked.sources, limit=k)
+        answer_sources = retriever.expand_zip_context(focused_sources, limit_per_zip=zip_limit)
+        log_access(
+            client, action="chat", query=query, sources=focused_sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        return answer_sources
+
+    answer_sources = await run_in_threadpool(prepare)
 
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -226,29 +265,28 @@ async def build_insights(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    reranked = _apply_rerank(query, sources, top_n=k)
-    sources = reranked.sources
-    log_access(
-        client, action="insights", query=query, sources=sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
-    report_draft = insights.draft_report(query, sources)
-    return JSONResponse({
-        "work_items": insights.group_work_items(sources),
-        "classifications": [insights.classify_source(s) for s in sources],
-        "workflow_mermaid": insights.build_mermaid_timeline(sources),
-        "calendar_drafts": insights.build_calendar_drafts(sources),
-        "report_draft": report_draft,
-        "report_workflow": insights.build_report_workflow(query, report_draft),
-    })
+    body, query = await _query_request(req)
+
+    def work():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "insights")
+        sources, reranked = _retrieve_ranked(retriever, query, body, default_k=12)
+        log_access(
+            client, action="insights", query=query, sources=sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        report_draft = insights.draft_report(query, sources)
+        return JSONResponse({
+            "work_items": insights.group_work_items(sources),
+            "classifications": [insights.classify_source(s) for s in sources],
+            "workflow_mermaid": insights.build_mermaid_timeline(sources),
+            "calendar_drafts": insights.build_calendar_drafts(sources),
+            "report_draft": report_draft,
+            "report_workflow": insights.build_report_workflow(query, report_draft),
+        })
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/studio")
@@ -261,32 +299,32 @@ async def build_studio(
 
     한 번의 검색으로 결정론적 산출물을 모두 반환한다. 요약(LLM)은 /studio/summary 로 분리.
     """
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    reranked = _apply_rerank(query, sources, top_n=k)
-    sources = reranked.sources
-    log_access(
-        client, action="studio", query=query, sources=sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
-    # 마인드맵 그룹 라벨만 선택적으로 LLM 의미 그룹핑(노드는 결정론적). 기본 활성,
-    # semantic_mindmap=false 로 끌 수 있고 실패 시 규칙기반으로 자동 폴백한다.
-    groups = None
-    if body.get("semantic_mindmap", True):
-        groups = _semantic_groups(query, sources)
-    return JSONResponse({
+    body, query = await _query_request(req)
+
+    def work():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "studio")
+        sources, reranked = _retrieve_ranked(retriever, query, body, default_k=12)
+        log_access(
+            client, action="studio", query=query, sources=sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        return JSONResponse(_studio_payload(query, sources, body))
+
+    return await run_in_threadpool(work)
+
+
+def _studio_payload(query: str, sources, body: dict) -> dict:
+    # 마인드맵 그룹 라벨만 선택적으로 LLM 의미 그룹핑(노드는 결정론적).
+    groups = _semantic_groups(query, sources) if body.get("semantic_mindmap", True) else None
+    return {
         "metrics": studio.studio_metrics(query, sources),
         "mindmap_mermaid": studio.build_mindmap_mermaid(query, sources, groups=groups),
         "mindmap_grouping": "semantic" if groups else "rule",
         "slides_marp": studio.build_slides_marp(query, sources),
         "infographic_svg": studio.build_infographic_svg(query, sources),
-    })
+    }
 
 
 def _semantic_groups(query: str, sources):
@@ -317,21 +355,21 @@ async def studio_summary(
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
     """NotebookLM식 소스 묶음 요약(SSE). /chat 과 같은 마스킹·제공자 선택을 재사용한다."""
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    sources = refine_sources(query, sources, limit=settings.rerank_max_candidates)
-    reranked = _apply_rerank(query, sources, top_n=k)
-    answer_sources = focus_sources(query, reranked.sources, limit=k)
-    log_access(
-        client, action="studio_summary", query=query, sources=answer_sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
+    body, query = await _query_request(req)
+
+    def prepare():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "studio_summary")
+        answer_sources, reranked = _retrieve_ranked(
+            retriever, query, body, default_k=12, refine=True, focus=True)
+        log_access(
+            client, action="studio_summary", query=query, sources=answer_sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        return answer_sources
+
+    answer_sources = await run_in_threadpool(prepare)
 
     def sse(event: str, data) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -355,36 +393,81 @@ async def studio_summary(
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+@app.post("/studio/stream")
+async def studio_stream(
+    req: Request,
+    authorization: str | None = Header(default=None),
+    api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
+):
+    """Retrieve once, then stream both Studio artifacts and the LLM summary."""
+    body, query = await _query_request(req)
+
+    def prepare():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "studio_stream")
+        answer_sources, reranked = _retrieve_ranked(
+            retriever, query, body, default_k=12, refine=True, focus=True)
+        payload = _studio_payload(query, answer_sources, body)
+        log_access(
+            client, action="studio", query=query, sources=answer_sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        return answer_sources, payload
+
+    answer_sources, payload = await run_in_threadpool(prepare)
+    provider, model = settings.resolve_llm()
+
+    def sse(event: str, data) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def gen():
+        yield sse("studio", payload)
+        yield sse("citations", rag.citations(answer_sources))
+        for delta in rag.stream_summary(
+            query, answer_sources, provider=provider, model=model,
+            anthropic_key=settings.anthropic_api_key, cohere_key=settings.cohere_api_key,
+            nous_key=settings.nous_api_key, nous_base_url=settings.nous_base_url,
+            gemini_key=settings.gemini_api_key,
+            gemini_use_vertex=settings.gemini_use_vertex,
+            gemini_project=settings.gemini_project,
+            gemini_location=settings.gemini_location,
+        ):
+            yield sse("token", delta)
+        yield sse("done", {})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @app.post("/hermes")
 async def hermes_report(
     req: Request,
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    known = set(body.get("known_document_ids") or [])
-    target_year = body.get("target_year")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(query, _candidate_count(k), body.get("dept"), _source_year(body))
-    reranked = _apply_rerank(query, sources, top_n=k)
-    sources = reranked.sources
-    log_access(
-        client, action="hermes", query=query, sources=sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
-    drafts = []
-    if isinstance(target_year, int):
-        drafts = hermes.draft_next_year_documents(sources, target_year, limit=3)
-    return JSONResponse({
-        "update_report": hermes.update_report(query, sources, known_document_ids=known),
-        "recurring_work": hermes.detect_recurring_work(sources),
-        "drafts": drafts,
-    })
+    body, query = await _query_request(req)
+
+    def work():
+        started = time.perf_counter()
+        known = set(body.get("known_document_ids") or [])
+        target_year = body.get("target_year")
+        client, retriever = _authorized_context(authorization, api_secret, "hermes")
+        sources, reranked = _retrieve_ranked(retriever, query, body, default_k=12)
+        log_access(
+            client, action="hermes", query=query, sources=sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        drafts = []
+        if isinstance(target_year, int):
+            drafts = hermes.draft_next_year_documents(sources, target_year, limit=3)
+        return JSONResponse({
+            "update_report": hermes.update_report(query, sources, known_document_ids=known),
+            "recurring_work": hermes.detect_recurring_work(sources),
+            "drafts": drafts,
+        })
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/reports")
@@ -393,37 +476,31 @@ async def wiki_report(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    started = time.perf_counter()
-    require_api_secret(api_secret)
-    body = await req.json()
-    query = body.get("query", "")
-    client, retriever = _client_and_retriever(authorization)
-    k = _bounded_k(body, default=12)
-    sources = retriever.retrieve(
-        query,
-        _candidate_count(k),
-        body.get("dept"),
-        _source_year(body),
-    )
-    reranked = _apply_rerank(query, sources, top_n=k)
-    sources = reranked.sources
-    log_access(
-        client, action="reports", query=query, sources=sources,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-        rerank_provider=reranked.provider, rerank_applied=reranked.applied,
-    )
-    target_year = body.get("target_year")
-    if not isinstance(target_year, int):
-        target_year = None
-    return JSONResponse(reports.build_wiki_report(
-        query,
-        sources,
-        report_type=body.get("report_type") or "result",
-        target_year=target_year,
-        recipient=body.get("recipient") or "[수신처]",
-        sender=body.get("sender") or "[발신기관명]",
-        dept=body.get("dept"),
-    ))
+    body, query = await _query_request(req)
+
+    def work():
+        started = time.perf_counter()
+        client, retriever = _authorized_context(authorization, api_secret, "reports")
+        sources, reranked = _retrieve_ranked(retriever, query, body, default_k=12)
+        log_access(
+            client, action="reports", query=query, sources=sources,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            rerank_provider=reranked.provider, rerank_applied=reranked.applied,
+        )
+        target_year = body.get("target_year")
+        if not isinstance(target_year, int):
+            target_year = None
+        return JSONResponse(reports.build_wiki_report(
+            query,
+            sources,
+            report_type=body.get("report_type") or "result",
+            target_year=target_year,
+            recipient=body.get("recipient") or "[수신처]",
+            sender=body.get("sender") or "[발신기관명]",
+            dept=body.get("dept"),
+        ))
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/hermes/docx")
@@ -432,23 +509,30 @@ async def hermes_docx(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    require_api_secret(api_secret)
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing authorization")
-    body = await req.json()
-    filename = docx_export.safe_docx_filename(body.get("docx_filename") or body.get("title") or "draft")
-    data = docx_export.build_approval_docx(
-        title=filename,
-        body=body.get("body") or "",
-        source_label=body.get("source_label") or "",
-        approval_form_plan=body.get("approval_form_plan") or [],
-    )
-    quoted = quote(filename)
-    return Response(
-        data,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
-    )
+    await run_in_threadpool(
+        authorize_request, authorization, api_secret, "export_docx", settings)
+    body = await read_json_object(req, max_bytes=settings.api_max_export_body_bytes)
+
+    def work():
+        raw_title = bounded_text(
+            body.get("docx_filename") or body.get("title") or "draft",
+            field="title", max_chars=300)
+        content = bounded_text(body.get("body"), field="body", max_chars=500_000)
+        source_label = bounded_text(body.get("source_label"), field="source_label", max_chars=2_000)
+        plan = body.get("approval_form_plan") or []
+        if not isinstance(plan, list) or len(plan) > 100 or any(not isinstance(v, str) for v in plan):
+            raise HTTPException(status_code=400, detail="invalid approval_form_plan")
+        filename = docx_export.safe_docx_filename(raw_title)
+        data = docx_export.build_approval_docx(
+            title=filename, body=content, source_label=source_label, approval_form_plan=plan)
+        quoted = quote(filename)
+        return Response(
+            data,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
+        )
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/hermes/hwpx")
@@ -457,25 +541,30 @@ async def hermes_hwpx(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    require_api_secret(api_secret)
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing authorization")
-    body = await req.json()
-    filename = hwpx_export.safe_hwpx_filename(
-        body.get("hwpx_filename") or body.get("docx_filename") or body.get("title") or "draft"
-    )
-    data = hwpx_export.build_approval_hwpx(
-        title=filename,
-        body=body.get("body") or "",
-        source_label=body.get("source_label") or "",
-        approval_form_plan=body.get("approval_form_plan") or [],
-    )
-    quoted = quote(filename)
-    return Response(
-        data,
-        media_type=hwpx_export.HWPX_MIME,
-        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
-    )
+    await run_in_threadpool(
+        authorize_request, authorization, api_secret, "export_hwpx", settings)
+    body = await read_json_object(req, max_bytes=settings.api_max_export_body_bytes)
+
+    def work():
+        raw_title = bounded_text(
+            body.get("hwpx_filename") or body.get("docx_filename") or body.get("title") or "draft",
+            field="title", max_chars=300)
+        content = bounded_text(body.get("body"), field="body", max_chars=500_000)
+        source_label = bounded_text(body.get("source_label"), field="source_label", max_chars=2_000)
+        plan = body.get("approval_form_plan") or []
+        if not isinstance(plan, list) or len(plan) > 100 or any(not isinstance(v, str) for v in plan):
+            raise HTTPException(status_code=400, detail="invalid approval_form_plan")
+        filename = hwpx_export.safe_hwpx_filename(raw_title)
+        data = hwpx_export.build_approval_hwpx(
+            title=filename, body=content, source_label=source_label, approval_form_plan=plan)
+        quoted = quote(filename)
+        return Response(
+            data,
+            media_type=hwpx_export.HWPX_MIME,
+            headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
+        )
+
+    return await run_in_threadpool(work)
 
 
 @app.post("/reports/template-hwpx")
@@ -484,22 +573,26 @@ async def report_template_hwpx(
     authorization: str | None = Header(default=None),
     api_secret: str | None = Header(default=None, alias="x-kmuwiki-api-secret"),
 ):
-    require_api_secret(api_secret)
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing authorization")
-    body = await req.json()
-    filename = hwpx_export.safe_hwpx_filename(body.get("title") or "wiki-report")
-    try:
-        data = hwpx_export.fill_template_hwpx_from_base64(
-            template_base64=body.get("template_base64") or "",
-            title=filename,
-            body=body.get("body") or "",
+    await run_in_threadpool(
+        authorize_request, authorization, api_secret, "export_template_hwpx", settings)
+    body = await read_json_object(req, max_bytes=settings.api_max_export_body_bytes)
+
+    def work():
+        title = bounded_text(body.get("title") or "wiki-report", field="title", max_chars=300)
+        content = bounded_text(body.get("body"), field="body", max_chars=500_000)
+        template_base64 = bounded_text(
+            body.get("template_base64"), field="template_base64", max_chars=16 * 1024 * 1024)
+        filename = hwpx_export.safe_hwpx_filename(title)
+        try:
+            data = hwpx_export.fill_template_hwpx_from_base64(
+                template_base64=template_base64, title=filename, body=content)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid hwpx template: {exc}") from exc
+        quoted = quote(filename)
+        return Response(
+            data,
+            media_type=hwpx_export.HWPX_MIME,
+            headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
         )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"invalid hwpx template: {exc}") from exc
-    quoted = quote(filename)
-    return Response(
-        data,
-        media_type=hwpx_export.HWPX_MIME,
-        headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted}"},
-    )
+
+    return await run_in_threadpool(work)

@@ -2,7 +2,6 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
-import { AppShell } from "@/components/AppShell";
 import { WorkflowBoard, type WorkflowNode } from "@/components/WorkflowBoard";
 import { getAccessToken, getUserEmail, signIn, signOut } from "@/lib/supabase";
 
@@ -35,18 +34,9 @@ export default function WorkflowDetailPage() {
     });
   }, []);
 
-  return (
-    <AppShell
-      active="workflows"
-      eyebrow="업무흐름도"
-      title={<>저장된 흐름도 <span className="gradient-text">열람</span></>}
-      lede="저장한 업무흐름도를 별도 페이지에서 다시 열고 단계별 세부 내용을 확인합니다."
-    >
-      {!ready ? <p className="muted">로딩...</p>
-        : email ? <WorkflowDetail id={id} email={email} onLogout={() => setEmail(null)} />
-        : <Login onLogin={setEmail} />}
-    </AppShell>
-  );
+  return !ready ? <p className="muted">로딩...</p>
+    : email ? <WorkflowDetail id={id} email={email} onLogout={() => setEmail(null)} />
+    : <Login onLogin={setEmail} />;
 }
 
 function Login({ onLogin }: { onLogin: (email: string) => void }) {

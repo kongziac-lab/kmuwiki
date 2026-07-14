@@ -10,6 +10,7 @@ import {
   isZipDirAllowed,
   parseAllowedIngestDirs,
   resolveZipDir,
+  trustedClientAddress,
 } from "@/lib/localIngest";
 
 const execFileAsync = promisify(execFile);
@@ -32,15 +33,20 @@ async function readIngestBody(req: Request): Promise<IngestBody> {
 function ingestStatus(req: Request, requestedZipDir?: unknown) {
   const url = new URL(req.url);
   const zipDir = resolveZipDir(process.env, requestedZipDir);
-  const allowed = isLocalIngestAllowed({
+  const allowedDirs = parseAllowedIngestDirs(process.env.KMU_LOCAL_INGEST_ALLOWED_DIRS);
+  const networkAllowed = isLocalIngestAllowed({
     nodeEnv: process.env.NODE_ENV,
     requestHost: url.host,
     enableFlag: process.env.KMU_ENABLE_LOCAL_INGEST,
+    trustProxyHeaders: process.env.KMU_TRUST_PROXY_HEADERS,
+    clientAddress: trustedClientAddress(req, process.env.KMU_TRUST_PROXY_HEADERS),
   });
   return {
-    allowed,
+    allowed: networkAllowed && allowedDirs.length > 0,
     zipDir,
     host: url.host,
+    clientAddress: trustedClientAddress(req, process.env.KMU_TRUST_PROXY_HEADERS),
+    allowedDirCount: allowedDirs.length,
     production: process.env.NODE_ENV === "production",
   };
 }
@@ -67,7 +73,7 @@ export async function POST(req: Request) {
     if (!status.allowed) {
       return new Response("local ingest is only available from localhost or a private LAN host", { status: 409 });
     }
-    // 선택 강화: KMU_LOCAL_INGEST_ALLOWED_DIRS(콤마 구분)를 설정하면 그 하위 경로만 허용.
+    // 필수 경계: 허용 목록이 없거나 그 밖의 경로면 실행하지 않는다.
     const allowedDirs = parseAllowedIngestDirs(process.env.KMU_LOCAL_INGEST_ALLOWED_DIRS);
     if (!isZipDirAllowed(status.zipDir, allowedDirs)) {
       return new Response("zip folder is outside KMU_LOCAL_INGEST_ALLOWED_DIRS", { status: 403 });
