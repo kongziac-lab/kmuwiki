@@ -292,6 +292,55 @@ class TestVerificationMode(unittest.TestCase):
         self.assertIn("2026. 3. 16", answer)
         self.assertNotIn("2026. 3. 18", answer)
 
+    def test_general_interview_question_lists_both_tracks_without_table_dumps(self):
+        dump = (
+            "일자 언어권 배정 구분 시작 시간 고사실 인원(명) 비고 "
+            "1 한천우 교육학과 ㅇㅇ 9/12(금) 오전 특수언어권(러시아어, 스페인어), "
+            "영어권(TOEFL) - 일반면접 일반면접 09:00"
+        )
+        letter = "[International Affairs Team] Request for Participation as Interviewer 9/17"
+        sources = self._selection_sources() + [
+            Source("assign", 0, dump, 0.8,
+                   filename="붙임 3. 면접전형 실시 계획(안).pdf", dept="국제교류팀"),
+            Source("letter", 0, letter, 0.7,
+                   filename="붙임 4. 면접위원 참여 요청.pdf", dept="국제교류팀"),
+        ]
+
+        memo = build_verification_memo("파견교환학생 면접 진행 일정에 대해 알려줘", sources)
+        answer = memo.deterministic_answer or ""
+
+        # 언어권 미지정 질문: 두 언어권의 면접 일정이 모두 나온다.
+        self.assertIn("중국어권 · 면접 전형: 2026. 3. 18", answer)
+        self.assertIn("중국어 외 언어권 · 면접 전형: 2026. 3. 16", answer)
+        # 붙임 배정표(개인별 행)와 영문 서신 조각은 일정 표에 오르지 않는다.
+        self.assertNotIn("한천우", answer)
+        self.assertNotIn("고사실", answer)
+        self.assertNotIn("International Affairs", answer)
+
+    def test_date_terms_cover_common_korean_phrasings(self):
+        self.assertEqual(classify_question("중국어권 면접 며칠이야"), "date")
+        self.assertEqual(classify_question("면접이 몇일인지 알려줘"), "date")
+
+    def test_pattern_questions_share_noise_filters_by_type(self):
+        approval_money = Source(
+            "appr", 0,
+            "03/16 03/16 03/16 전결 담당자 이현지 팀장 조현욱 소요 예산 300,000원",
+            0.9, filename="결재.pdf", dept="국제교류팀",
+        )
+        head_count_table = Source(
+            "table", 0,
+            "면접 배정 고사실 인원(명) 비고 15명 시작 시간 09:00",
+            0.8, filename="붙임 배정표.pdf", dept="국제교류팀",
+        )
+
+        # 금액 질문: 결재라인 창은 근거에서 제외된다.
+        money = build_verification_memo("면접 소요 예산 금액 알려줘", [approval_money])
+        self.assertFalse(any("전결" in line for line in money.confirmed))
+
+        # 인원 질문: 표가 곧 근거이므로 표 조각을 걸러내지 않는다.
+        count = build_verification_memo("면접 인원 몇 명이야", [head_count_table])
+        self.assertTrue(any("15명" in line for line in count.confirmed))
+
     def test_contact_boilerplate_and_month_only_dates_are_not_schedules(self):
         sources = [
             Source(

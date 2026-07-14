@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from .retriever import Source
 
 
-DATE_TERMS = ("언제", "일정", "일시", "날짜", "개최일", "방문일", "출장기간", "기간")
+DATE_TERMS = ("언제", "일정", "일시", "날짜", "개최일", "방문일", "출장기간", "기간", "며칠", "몇일")
 COUNT_TERMS = ("몇 명", "몇명", "인원", "명단", "몇 개", "건수")
 # "원"은 직원·지원·병원·원장 등 흔한 단어의 부분 문자열이라 단독으로 두면
 # 금액과 무관한 질문까지 money로 오분류된다(→ 전체 ZIP 확장 오작동). 금액 의도가
@@ -25,11 +25,6 @@ COUNT_PATTERN = re.compile(r"(?<!\d)(\d{1,4})\s*(?:명|개|건|부|팀)(?!\d)")
 MONEY_PATTERN = re.compile(r"(?<!\d)(?:[$＄]\s*)?\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*(?:달러|원|천원|만원|억원|USD|KRW)?")
 PLACE_PATTERN = re.compile(r"(?:장소|위치|출장 장소|개최 장소)\s*[:：]?\s*([^.\n。]{2,80})")
 APPROVAL_PATTERN = re.compile(r"(전결|대결|승인|결재|확정|완료)")
-EVENT_ANCHORS = (
-    "개최일시", "개최 일시", "개최일", "행사일시", "행사 일시", "일시:",
-    "일시", "기간", "방문일", "내방일", "출장기간", "출장 기간", "면접일",
-    "시험일", "시행일", "일자",
-)
 RELATED_ANCHORS = ("관련:", "관련 :", "관련문서", "관련 문서")
 APPROVAL_MARKERS = ("전결", "대결", "담당자", "팀장", "처장", "원장")
 # 언어권 그룹 라벨(예: "중국어권", "중국어 외 언어권", "중국어 및 언어권").
@@ -40,6 +35,17 @@ LANG_BASES = ("중국어", "영어", "일본어", "스페인어", "러시아어"
 # 연락처·공개구분 등 결재/안내 보일러플레이트 — 일정 근거로 쓰지 않는다.
 PHONE_PATTERN = re.compile(r"0\d{1,2}-\d{3,4}-\d{4}")
 BOILERPLATE_MARKERS = ("[이메일]", "부분공개", "문의 사항", "문의사항")
+# 일정 판정의 핵심 기준: '이벤트 라벨이 완전한 날짜에 인접'한 문장 구조.
+# ("window 안에 면접·날짜가 공존"만으로는 붙임 배정표 같은 평탄화된 표가
+#  통과한다 — 표에는 라벨-날짜 인접 구조가 없으므로 이 기준이 구조적으로 거른다.)
+EVENT_LABELED_DATE_PATTERN = re.compile(
+    r"(?:전형|시험|면접|접수|마감|발표|선정|일시|일자|기간|내방|방문|개최|행사|출장|시행)"
+    r"[^가-힣0-9]{0,12}"
+    r"(?:20\d{2}[.\-/년]\s*(?:1[0-2]|0?[1-9])[.\-/월]\s*(?:3[01]|[12]\d|0?[1-9])(?!\d)"
+    r"|(?:1[0-2]|0?[1-9])/(?:3[01]|[12]\d|0?[1-9])(?!\d))"
+)
+# 붙임 배정표(개인별 면접 배정) 특유의 열 이름 — 2개 이상이면 표 덤프로 본다.
+TABLE_DUMP_TOKENS = ("고사실", "배정", "인원(명)", "언어권 배정", "시작 시간")
 
 
 @dataclass(frozen=True)
@@ -159,10 +165,9 @@ def _verify_date_question(query: str, sources: list[Source]) -> VerificationMemo
             if _looks_like_approval_line(window):
                 approval_hits.append((idx, window, label))
                 continue
-            if _looks_like_boilerplate(window):
+            if _looks_like_boilerplate(window) or _looks_like_table_dump(window):
                 continue
-            if (_has_any(window, EVENT_ANCHORS) or _looks_like_schedule_item(window)) \
-                    and _has_full_date(window):
+            if _has_labeled_event_date(window):
                 event_hits.append((idx, window, label))
             elif _has_any(window, RELATED_ANCHORS):
                 related_hits.append((idx, window, label))
@@ -235,6 +240,14 @@ def _verify_pattern_question(
         for match in pattern.finditer(text):
             window = text[max(0, match.start() - 80): min(len(text), match.end() + 120)]
             if not _matches_focus(f"{source.label()} {window}", focus_terms):
+                continue
+            # 날짜 질문과 같은 노이즈 필터를 유형별로 적용한다.
+            # 단, 결재 질문엔 결재라인이 곧 근거이고 인원 질문엔 표가 곧 근거라 제외.
+            if query_type != "approval" and _looks_like_approval_line(window):
+                continue
+            if _looks_like_boilerplate(window):
+                continue
+            if query_type not in ("count_or_list", "approval") and _looks_like_table_dump(window):
                 continue
             hits.append(f"[{idx}] {label}: {_short(window)}")
             if len(hits) >= 8:
@@ -364,7 +377,7 @@ def _date_answer_from_event_hits(
     event_hits: list[tuple[int, str, str]],
     form_hits: list[tuple[int, str]],
 ) -> str:
-    seen: set[tuple[int, str]] = set()
+    seen: set[str] = set()
     rows = []
     for idx, sentence, label in event_hits:
         summary = _event_date_summary(sentence)
@@ -373,9 +386,10 @@ def _date_answer_from_event_hits(
         lang = LANG_GROUP_PATTERN.search(sentence)
         if lang and lang.group(0) not in summary:
             summary = f"{lang.group(0)} · {summary}"
-        # 요약 전체를 키로 쓴다. 첫 날짜만 키로 쓰면 같은 날짜로 시작하는
-        # 서로 다른 언어권 블록(예: 서류전형 3.10 공통)이 통째로 탈락한다.
-        key = (idx, _compact(summary))
+        # 요약 전체를 전역 키로 쓴다. 첫 날짜만 키로 쓰면 같은 날짜로 시작하는
+        # 서로 다른 언어권 블록이 탈락하고, 문서(idx)까지 키에 넣으면 같은 ZIP의
+        # pdf/mht 쌍둥이가 같은 일정을 중복 행으로 만든다(5행 상한 잠식).
+        key = _compact(summary)
         if key in seen:
             continue
         seen.add(key)
@@ -613,10 +627,18 @@ def _looks_like_boilerplate(window: str) -> bool:
     return bool(PHONE_PATTERN.search(window)) or _has_any(window, BOILERPLATE_MARKERS)
 
 
-def _has_full_date(window: str) -> bool:
-    """일(日)까지 있는 날짜가 하나라도 있는가. '2026. 3.' 같은 연·월-only
-    조각(문서번호·본문 말미 표기)은 행사 일정 근거로 삼지 않는다."""
-    return any(m.group(3) or m.group(5) for m in DATE_PATTERN.finditer(window))
+def _looks_like_table_dump(window: str) -> bool:
+    """붙임 배정표류의 평탄화된 표 조각인가(개인별 배정 행·열 이름 나열)."""
+    return sum(1 for token in TABLE_DUMP_TOKENS if token in window) >= 2
+
+
+def _has_labeled_event_date(window: str) -> bool:
+    """이벤트 라벨(전형·시험·일시·기간 등)이 완전한 날짜(일 포함)에 인접한가.
+
+    '2026. 3.'처럼 일(日) 없는 조각이나, 라벨 없이 날짜만 흩어진 표·서신은
+    일정 근거로 삼지 않는다.
+    """
+    return bool(EVENT_LABELED_DATE_PATTERN.search(window))
 
 
 def _looks_like_schedule_item(sentence: str) -> bool:
