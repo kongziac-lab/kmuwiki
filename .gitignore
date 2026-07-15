@@ -10,6 +10,8 @@ ingest/.env.worker
 # Python
 __pycache__/
 *.pyc
+.venv*/
+.tmp-venv/
 
 # 생성 부산물(검증 리포트)
 phase6-report.json

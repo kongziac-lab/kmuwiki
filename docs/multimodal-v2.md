@@ -39,9 +39,12 @@
 
 2026-07-15 현재 원격 Supabase에는 마이그레이션 `0012`와 질의 한도를 보강한 `0013`이
 적용되어 있다. 현황은
-`documents: v1=78, v2=0`, 기존 `doc_chunks=163`이며 모델은
-`embed-multilingual-v3.0/v3`이다. 이 작업 PC에는 전체 원본 ZIP이 연결되어 있지 않아 실제
-재인덱싱은 NAS 원본을 볼 수 있는 컴퓨터에서 이어서 실행한다.
+`source_archives=16`, `documents: v1=3, v2=45`, 기존 `doc_chunks=80`이며 롤백 모델은
+`embed-multilingual-v3.0/v3`이다. Windows 시각 워커에서 NAS 원본 `16/16 available`을 확인하고
+재색인을 완료했다. `search_units=279`는 모두 `embed-v4.0/v4.0-1024`이며 컷오버 게이트는
+`ready=true`를 반환한다. Windows 로컬 RAG 서비스는 `hybrid_search_v2`로 전환·재시작했으며,
+관리자와 일반 사용자 모두 텍스트·표·스캔 유래 검색을 통과했다. 일반 사용자의 타 부서·제한 등급
+누출은 0건이다.
 
 ## NAS 연결 컴퓨터에서 재구축
 
@@ -64,13 +67,13 @@ python -m kmu_ingest.cli v2-status
 python -m kmu_ingest.cli reindex-v2 --path "$KMU_ZIP_DIR"
 python -m kmu_ingest.cli v2-status
 python -m kmu_ingest.cli cutover-check \
-  --expected-source-archives 22 \
-  --minimum-total-documents 78 \
-  --minimum-v2-documents 71
+  --expected-source-archives 16 \
+  --minimum-total-documents 48 \
+  --minimum-v2-documents 42
 ```
 
 첫 실행에는 PP-StructureV3, PP-OCRv5, 한국어 NER 모델 다운로드 시간이 든다. 원본 경로는
-읽기 전용 마운트를 권장한다. `reindex-v2`는 DB에 등록된 원본 ZIP 22개를 지정한 루트에서
+읽기 전용 마운트를 권장한다. `reindex-v2`는 DB에 등록된 원본 ZIP 16개를 지정한 루트에서
 먼저 확인하며 하나라도 없거나 상대 경로가 루트를 벗어나면 처리 전에 종료한다. 재구축 종료 후
 다음 조건을 확인한다.
 
