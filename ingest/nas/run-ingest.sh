@@ -37,7 +37,32 @@ LOG="$LOG_DIR/ingest-$CMD-$TS.log"
 
 echo "[$(date)] start: $DC run --rm worker $CMD" | tee -a "$LOG"
 
+DATA_ROOT="/volume1/jdh/kmuwiki"
+if [ ! -d "$DATA_ROOT/01_raw" ]; then
+  echo "[$(date)] ERROR: expected source directory is missing: $DATA_ROOT/01_raw" | tee -a "$LOG"
+  echo "[$(date)] diagnostic: /volume1/jdh entries" | tee -a "$LOG"
+  ls -la /volume1/jdh >>"$LOG" 2>&1 || true
+  echo "[$(date)] diagnostic: Kmuwiki directories under NAS volumes" | tee -a "$LOG"
+  find -L /volume* -maxdepth 5 -type d -iname 'kmuwiki' -print >>"$LOG" 2>&1 || true
+  exit 1
+fi
+
 # 0) 스테이징: 00_inbox 검증 → 01_raw 반입(실패해도 인제스트는 계속 — 기존 원본 처리).
+BUILD_MARKER="$REPO_DIR/ingest/.image-build-fingerprint"
+BUILD_FINGERPRINT=$( {
+  sha256sum "$REPO_DIR/ingest/Dockerfile" "$REPO_DIR/ingest/requirements-worker.txt"
+  find "$REPO_DIR/ingest/kmu_ingest" -type f -exec sha256sum {} \;
+} | sha256sum | awk '{print $1}' )
+if [ ! -f "$BUILD_MARKER" ] || [ "$(cat "$BUILD_MARKER")" != "$BUILD_FINGERPRINT" ]; then
+  echo "[$(date)] build: source or dependency change detected" | tee -a "$LOG"
+  $DC --env-file "$WORKER_ENV" -f "$COMPOSE_FILE" build worker stager >>"$LOG" 2>&1
+  printf '%s\n' "$BUILD_FINGERPRINT" >"$BUILD_MARKER"
+fi
+
+echo "[$(date)] diagnostic: source permissions and worker identity" | tee -a "$LOG"
+ls -ld "$DATA_ROOT" "$DATA_ROOT/00_inbox" "$DATA_ROOT/01_raw" "$DATA_ROOT/99_rejected" >>"$LOG" 2>&1 || true
+id admin >>"$LOG" 2>&1 || true
+
 set +e
 echo "[$(date)] stage: $DC run --rm stager" | tee -a "$LOG"
 $DC --env-file "$WORKER_ENV" -f "$COMPOSE_FILE" run --rm stager >>"$LOG" 2>&1

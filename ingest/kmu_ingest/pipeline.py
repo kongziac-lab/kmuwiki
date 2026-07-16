@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from . import lockdetect
 from .chunking import chunk_prefix, chunk_text
 from .classification import classify_document
-from .cleaning import strip_boilerplate
+from .cleaning import sanitize_text, strip_boilerplate
 from .config import Settings
 from .embedding import EmbeddingInput
 from .hashing import sha256_bytes
@@ -301,9 +301,9 @@ def _prepare_assets(
         )
         text_masker = (deps.visual_masker or deps.masker.high_risk_copy()) \
             if (parsed.needs_ocr or visual_derived) else deps.masker
-        text_result = text_masker.mask(parsed.text or "")
-        structured_result = text_masker.mask(parsed.structured_content or "")
-        caption_result = text_masker.mask(parsed.caption or "")
+        text_result = text_masker.mask(sanitize_text(parsed.text))
+        structured_result = text_masker.mask(sanitize_text(parsed.structured_content))
+        caption_result = text_masker.mask(sanitize_text(parsed.caption))
         for value, current_masker in (
             (text_result.text, text_masker),
             (structured_result.text, text_masker),

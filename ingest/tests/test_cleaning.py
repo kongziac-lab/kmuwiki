@@ -4,6 +4,9 @@ from kmu_ingest.cleaning import strip_boilerplate
 
 
 class TestCleaning(unittest.TestCase):
+    def test_strips_nul_characters(self):
+        self.assertEqual("alpha beta", strip_boilerplate("alpha\x00 beta"))
+
     def test_strips_inline_mht_header_boilerplate(self):
         text = (
             '"진리와 정의와 사랑의 나라를 위하여" 국제처 수신자 내부결재 (경 유) '

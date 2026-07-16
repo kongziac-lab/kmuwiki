@@ -29,7 +29,8 @@ COPY kmu_ingest ./kmu_ingest
 
 # 비-root 사용자로 실행(원본 마운트 blast radius 축소).
 RUN useradd --create-home --uid 10001 worker \
-    && chown -R worker:worker /app
+    && chown -R worker:worker /app \
+    && chmod -R a+rX /app
 USER worker
 
 # NAS 기본값(compose/env_file 에서 덮어쓸 수 있음). 명시적 안전 기본.

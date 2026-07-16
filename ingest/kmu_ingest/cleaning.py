@@ -42,10 +42,15 @@ _INLINE_SUBS = [
 ]
 
 
+def sanitize_text(text: str | None) -> str:
+    """Remove characters PostgreSQL cannot store in text columns."""
+    return (text or "").replace("\x00", "")
+
+
 def strip_boilerplate(text: str | None) -> str:
     if not text:
         return text or ""
-    cleaned = text.replace("\xa0", " ")
+    cleaned = sanitize_text(text).replace("\xa0", " ")
     for pattern in _INLINE_SUBS:
         cleaned = pattern.sub(" ", cleaned)
     kept = [ln for ln in cleaned.splitlines()
