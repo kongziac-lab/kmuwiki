@@ -3,7 +3,7 @@
 반환 ParseResult.needs_ocr=True 이면 스캔본으로 보고 OCR 단계로 넘긴다.
 잠긴 파일은 이 단계에 오지 않는다(lockdetect 에서 걸러짐, 불변식 2).
 
-지원 포맷(실제 전자결재 ZIP 기준): pdf, hwp/hwpx, docx, xls/xlsx, html/htm, mht, txt/csv/md/json/xml.
+지원 포맷(실제 전자결재 ZIP 기준): pdf, hwp/hwpx, doc/docx, xls/xlsx, html/htm, mht, txt/csv/md/json/xml.
 """
 
 from __future__ import annotations
@@ -11,9 +11,12 @@ from __future__ import annotations
 import html as _htmlmod
 import io
 import mimetypes
+import os
 import re
+import tempfile
 import zipfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from .models import ParsedAsset
 
@@ -46,6 +49,8 @@ def extract_text(filename: str, data: bytes, *, max_visual_pages: int = 100) -> 
         return _pdf(data, max_visual_pages=max_visual_pages)
     if name.endswith(".docx"):
         return _docx(data)
+    if name.endswith(".doc"):
+        return _doc(data)
     if name.endswith(".xlsx"):
         return _xlsx(data)
     if name.endswith(".xls"):
@@ -269,6 +274,60 @@ def _docx(data: bytes) -> ParseResult:
         mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         assets=assets,
     )
+
+
+def _doc(data: bytes) -> ParseResult:
+    if not _word_com_supported():
+        return ParseResult("", mime_type="application/msword")
+
+    try:
+        import pythoncom
+        import win32com.client
+    except ImportError:
+        return ParseResult("", mime_type="application/msword")
+
+    word = None
+    document = None
+    pythoncom.CoInitialize()
+    try:
+        with tempfile.TemporaryDirectory(prefix="kmuwiki-doc-") as temp_dir:
+            source = Path(temp_dir) / "source.doc"
+            converted = Path(temp_dir) / "converted.docx"
+            source.write_bytes(data)
+
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = 0
+            word.AutomationSecurity = 3
+            document = word.Documents.Open(
+                str(source),
+                ConfirmConversions=False,
+                ReadOnly=True,
+                AddToRecentFiles=False,
+                Visible=False,
+            )
+            document.SaveAs2(str(converted), FileFormat=16)
+            document.Close(False)
+            document = None
+            return _docx(converted.read_bytes())
+    except Exception:
+        return ParseResult("", mime_type="application/msword")
+    finally:
+        if document is not None:
+            try:
+                document.Close(False)
+            except Exception:
+                pass
+        if word is not None:
+            try:
+                word.Quit()
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
+
+
+def _word_com_supported() -> bool:
+    return os.name == "nt"
 
 
 def _xlsx(data: bytes) -> ParseResult:

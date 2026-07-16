@@ -37,11 +37,11 @@
   따라서 구축 중에는 기존 검색을 유지할 수 있고, 전환 실패 시 RPC와 임베딩 모델을 함께 v1/v3로
   되돌릴 수 있다.
 
-2026-07-15 현재 원격 Supabase에는 마이그레이션 `0012`와 질의 한도를 보강한 `0013`이
+2026-07-16 현재 원격 Supabase에는 마이그레이션 `0011`, `0012`와 질의 한도를 보강한 `0013`이
 적용되어 있다. 현황은
-`source_archives=16`, `documents: v1=3, v2=45`, 기존 `doc_chunks=80`이며 롤백 모델은
+`source_archives=16`, `documents: v1=2, v2=46`, 기존 `doc_chunks=80`이며 롤백 모델은
 `embed-multilingual-v3.0/v3`이다. Windows 시각 워커에서 NAS 원본 `16/16 available`을 확인하고
-재색인을 완료했다. `search_units=279`는 모두 `embed-v4.0/v4.0-1024`이며 컷오버 게이트는
+재색인을 완료했다. `search_units=291`는 모두 `embed-v4.0/v4.0-1024`이며 컷오버 게이트는
 `ready=true`를 반환한다. Windows 로컬 RAG 서비스는 `hybrid_search_v2`로 전환·재시작했으며,
 관리자와 일반 사용자 모두 텍스트·표·스캔 유래 검색을 통과했다. 일반 사용자의 타 부서·제한 등급
 누출은 0건이다.
@@ -69,7 +69,7 @@ python -m kmu_ingest.cli v2-status
 python -m kmu_ingest.cli cutover-check \
   --expected-source-archives 16 \
   --minimum-total-documents 48 \
-  --minimum-v2-documents 42
+  --minimum-v2-documents 46
 ```
 
 첫 실행에는 PP-StructureV3, PP-OCRv5, 한국어 NER 모델 다운로드 시간이 든다. 원본 경로는

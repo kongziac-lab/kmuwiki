@@ -53,6 +53,12 @@ click==8.4.2
     #   uvicorn
 cohere==7.0.5
     # via -r requirements.in
+colorama==0.4.6
+    # via
+    #   click
+    #   colorlog
+    #   tqdm
+    #   typer
 colorlog==6.10.1
     # via paddlex
 crc32c==2.8
@@ -307,6 +313,8 @@ python-docx==1.2.0
     #   -r requirements.in
 python-dotenv==1.2.2
     # via -r requirements.in
+pywin32==312
+    # via -r requirements-worker.in
 pyyaml==6.0.2
     # via
     #   huggingface-hub
@@ -436,6 +444,8 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
+tzdata==2026.3
+    # via pandas
 ujson==5.13.0
     # via paddlex
 urllib3==2.7.0

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .backfill import DEFAULT_MAX_PASSWORD_ATTEMPTS, load_password_dictionary, run_backfill
 from .config import load_settings
+from .hashing import sha256_bytes
 from .staging import StageLimits, stage_inbox
 from .embedding import make_embedder
 from .layout import LayoutAnalyzer
@@ -23,6 +24,7 @@ from .ocr import OCREngine
 from .pii.masker import Masker
 from .pii.policy import MaskPolicy
 from .pipeline import Deps, process
+from .retention import cleanup_security_retention
 from .store import make_store
 from .visual import VisualSanitizer
 from .watcher import iter_work, iter_zip_files
@@ -69,12 +71,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     zips = iter_zip_files(settings.zip_dir)
+    zip_root = Path(settings.zip_dir)
+    only_sources = set(getattr(args, "only_source", None) or [])
+    if only_sources:
+        zips = [zip_path for zip_path in zips
+                if zip_path.relative_to(zip_root).as_posix() in only_sources]
+        missing_sources = only_sources - {
+            zip_path.relative_to(zip_root).as_posix() for zip_path in zips
+        }
+        if missing_sources:
+            raise RuntimeError(f"requested source ZIP not found: {sorted(missing_sources)}")
+    only_sha256 = {value.lower() for value in (getattr(args, "only_sha256", None) or [])}
     print(f"ZIP {len(zips)}개 발견 @ {settings.zip_dir} "
           f"(dry_run={settings.dry_run}, embed={settings.embed_provider}, "
           f"ocr={settings.ocr_backend}, force={force})")
 
     stats: Counter[str] = Counter()
-    zip_root = Path(settings.zip_dir)
     for zp in zips:
         print(f"\n# {zp.name}")
         for item in iter_work(
@@ -85,6 +97,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             max_entry_bytes=settings.max_zip_entry_bytes,
             max_compression_ratio=settings.max_zip_compression_ratio,
         ):
+            if only_sha256 and sha256_bytes(item.data) not in only_sha256:
+                continue
             status = process(item, deps)
             stats[status.value] += 1
 
@@ -290,6 +304,21 @@ def cmd_stage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_retention_cleanup(args: argparse.Namespace) -> int:
+    from supabase import create_client
+
+    settings = load_settings()
+    if not settings.supabase_url or not settings.supabase_service_key:
+        raise RuntimeError("Supabase service credentials are required")
+    result = cleanup_security_retention(
+        create_client(settings.supabase_url, settings.supabase_service_key),
+        audit_days=args.audit_days,
+        rate_limit_days=args.rate_limit_days,
+    )
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _make_visual_masker(settings):
     if not settings.visual_index_enabled or settings.ocr_backend == "none":
         return None
@@ -321,10 +350,18 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--dry-run", action="store_true", help="DB 미적재, 콘솔 출력만")
     r.add_argument("--force", action="store_true",
                    help="이미 적재된 ZIP도 재처리(파서·청킹·메타 개선 소급 적용)")
+    r.add_argument("--only-source", action="append",
+                   help="재처리할 원본 ZIP의 ZIP 폴더 기준 상대 경로(반복 가능)")
+    r.add_argument("--only-sha256", action="append",
+                   help="재처리할 문서 SHA-256(반복 가능)")
     r.set_defaults(func=cmd_run)
     rv2 = sub.add_parser("reindex-v2", help="모든 기존 문서를 Embed v4 멀티모달 v2로 재구축")
     rv2.add_argument("--path", help="ZIP 폴더 경로(기본 KMU_ZIP_DIR)")
     rv2.add_argument("--dry-run", action="store_true", help="DB 미적재 사전 검증")
+    rv2.add_argument("--only-source", action="append",
+                     help="재처리할 원본 ZIP의 ZIP 폴더 기준 상대 경로(반복 가능)")
+    rv2.add_argument("--only-sha256", action="append",
+                     help="재처리할 문서 SHA-256(반복 가능)")
     rv2.set_defaults(func=cmd_run, force=True, require_v2=True)
     status = sub.add_parser("v2-status", help="v1/v2 문서·자산·검색 단위 전환 현황")
     status.set_defaults(func=cmd_v2_status)
@@ -356,6 +393,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--raw", default=os.environ.get("KMU_RAW_DIR", "/data/raw"))
     s.add_argument("--rejected", default=os.environ.get("KMU_REJECTED_DIR", "/data/rejected"))
     s.set_defaults(func=cmd_stage)
+    retention = sub.add_parser(
+        "retention-cleanup", help="감사 로그와 API rate-limit 만료 행 정리")
+    retention.add_argument("--audit-days", type=int, default=180)
+    retention.add_argument("--rate-limit-days", type=int, default=1)
+    retention.set_defaults(func=cmd_retention_cleanup)
     args = p.parse_args(argv)
     return args.func(args)
 

@@ -1,0 +1,6 @@
+ingest/.venv/
+ingest/.venv-visual/
+ingest/**/__pycache__/
+ingest/**/*.pyc
+web/node_modules/
+web/.next/

@@ -40,7 +40,16 @@ class LayoutAnalyzer:
             return
         from paddleocr import PPStructureV3  # lazy: visual worker only
 
-        self._pipeline = PPStructureV3()
+        self._pipeline = PPStructureV3(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            use_table_recognition=False,
+            use_formula_recognition=False,
+            use_chart_recognition=False,
+            use_seal_recognition=False,
+            enable_mkldnn=False,
+        )
 
     def ensure_available(self) -> bool:
         try:

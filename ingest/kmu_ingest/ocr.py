@@ -50,6 +50,7 @@ class OCREngine:
                     use_doc_orientation_classify=False,
                     use_doc_unwarping=False,
                     use_textline_orientation=True,
+                    enable_mkldnn=False,
                 )
             except TypeError:
                 # PaddleOCR 2.x compatibility. v3 workers always take the

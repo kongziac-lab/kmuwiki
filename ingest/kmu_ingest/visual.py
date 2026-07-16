@@ -130,7 +130,7 @@ class VisualSanitizer:
             width=image.width,
             height=image.height,
             masked_ocr_text=masked.text,
-            redaction_applied=bool(redact_indexes),
+            redaction_applied=True,
         )
 
 

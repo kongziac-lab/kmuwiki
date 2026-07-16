@@ -187,6 +187,29 @@ class _FakeLayoutAnalyzer:
 
 
 class TestLayoutExtraction(unittest.TestCase):
+    def test_ppstructure_disables_mkldnn(self):
+        calls = []
+
+        class _Pipeline:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+        module = types.SimpleNamespace(PPStructureV3=_Pipeline)
+        with patch.dict(sys.modules, {"paddleocr": module}):
+            analyzer = LayoutAnalyzer("ppstructure")
+            analyzer._ensure()
+
+        self.assertEqual(calls, [{
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "use_table_recognition": False,
+            "use_formula_recognition": False,
+            "use_chart_recognition": False,
+            "use_seal_recognition": False,
+            "enable_mkldnn": False,
+        }])
+
     def test_layout_markdown_and_regions_are_attached_to_page(self):
         assets = [ParsedAsset(
             asset_type="page", page_no=2, image_bytes=_png_bytes(), media_type="image/png",
@@ -236,6 +259,20 @@ class _SequenceOCR:
 
 
 class TestVisualSanitizer(unittest.TestCase):
+    def test_paddle_ocr_disables_mkldnn(self):
+        calls = []
+
+        class _Reader:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+        module = types.SimpleNamespace(PaddleOCR=_Reader)
+        with patch.dict(sys.modules, {"paddleocr": module}):
+            ocr = OCREngine("paddle")
+            ocr._ensure()
+
+        self.assertFalse(calls[0]["enable_mkldnn"])
+
     def test_redacts_and_rechecks_policy_matched_pixels(self):
         first = OCRAnalysis(spans=[OCRSpan(
             "900101-1234567", (10, 10, 180, 45), 0.99,
@@ -253,6 +290,19 @@ class TestVisualSanitizer(unittest.TestCase):
         self.assertTrue(result.redaction_applied)
         self.assertIn("[주민등록번호]", result.masked_ocr_text)
         self.assertNotEqual(result.image_bytes, _png_bytes())
+
+    def test_clean_visual_records_completed_redaction_verification(self):
+        first = OCRAnalysis(spans=[OCRSpan("회의실", (10, 10, 80, 45), 0.99)])
+        second = OCRAnalysis(spans=[OCRSpan("회의실", (10, 10, 80, 45), 0.99)])
+        sanitizer = VisualSanitizer(
+            _SequenceOCR([first, second]),
+            verify_after_redaction=True,
+        )
+
+        result = sanitizer.sanitize(_png_bytes(), masker=Masker(policy=MaskPolicy.all()))
+
+        self.assertTrue(result.safe)
+        self.assertTrue(result.redaction_applied)
 
     def test_fails_closed_without_local_ocr(self):
         masker = Masker(enable_ner=True, ner=_NER(), policy=MaskPolicy.all())

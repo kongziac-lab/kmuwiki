@@ -1,10 +1,58 @@
 import io
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
 from kmu_ingest.parsers import extract_text
 
 
 class TestMultimodalParsers(unittest.TestCase):
+    def test_legacy_doc_uses_hardened_word_conversion(self):
+        calls = []
+
+        class _Document:
+            def SaveAs2(self, path, FileFormat):
+                calls.append(("save", FileFormat))
+                from docx import Document
+
+                converted = Document()
+                converted.add_paragraph("레거시 문서 본문")
+                converted.save(path)
+
+            def Close(self, save):
+                calls.append(("close", save))
+
+        class _Documents:
+            def Open(self, path, **kwargs):
+                calls.append(("open", kwargs))
+                return _Document()
+
+        class _Word:
+            Documents = _Documents()
+
+            def Quit(self):
+                calls.append(("quit",))
+
+        word = _Word()
+        client = types.SimpleNamespace(DispatchEx=lambda name: word)
+        pythoncom = types.SimpleNamespace(CoInitialize=lambda: None, CoUninitialize=lambda: None)
+        modules = {
+            "pythoncom": pythoncom,
+            "win32com": types.SimpleNamespace(client=client),
+            "win32com.client": client,
+        }
+
+        with patch("kmu_ingest.parsers._word_com_supported", return_value=True), patch.dict(sys.modules, modules):
+            parsed = extract_text("legacy.doc", b"binary-doc")
+
+        self.assertIn("레거시 문서 본문", parsed.text)
+        self.assertEqual(word.AutomationSecurity, 3)
+        self.assertEqual(calls[0][0], "open")
+        self.assertTrue(calls[0][1]["ReadOnly"])
+        self.assertFalse(calls[0][1]["AddToRecentFiles"])
+        self.assertIn(("save", 16), calls)
+
     def test_pdf_emits_rendered_page_with_page_number(self):
         try:
             import fitz
